@@ -7,7 +7,8 @@ from plotly.subplots import make_subplots
 
 DARK = dict(
     paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-    font_color="#e2e8f0", gridcolor="#252a38",
+        font={"color": "#e2e8f0"},
+    )
 )
 
 st.markdown("# 🔍 EDA & Calidad de Datos")

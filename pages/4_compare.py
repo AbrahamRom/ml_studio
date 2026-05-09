@@ -5,8 +5,7 @@ import streamlit as st
 DARK = dict(
     paper_bgcolor="#0d0f14",
     plot_bgcolor="#141720",
-    font_color="#e2e8f0",
-    gridcolor="#252a38",
+    font={"color": "#e2e8f0"},
 )
 PALETTE = ["#5b6af0", "#2dd4bf", "#f59e0b", "#f43f5e", "#a78bfa", "#34d399"]
 
