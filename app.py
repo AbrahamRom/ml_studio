@@ -12,8 +12,8 @@ st.set_page_config(
 load_global_css()
 
 # ── Session state init ─────────────────────────────────────────────────────────
-for key in ["df", "task_type", "target_cols", "mode",
-            "trained_models", "best_model", "setup_done",
+for key in ["df", "task_type", "target_cols", "target_configs", "mode",
+            "trained_models", "best_model", "setup_done", "automl_run",
             "compare_df", "multioutput"]:
     if key not in st.session_state:
         st.session_state[key] = None
@@ -48,7 +48,7 @@ with st.sidebar:
     checks = {
         "Dataset loaded":   st.session_state.df is not None,
         "Targets selected": st.session_state.target_cols is not None,
-        "Models trained":   st.session_state.trained_models is not None,
+        "Models trained":   st.session_state.automl_run is not None,
     }
     for label, done in checks.items():
         icon = "✅" if done else "⬜"

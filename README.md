@@ -1,85 +1,86 @@
-# ⚗️ ML Studio — Pipeline Visual de Machine Learning
+# ⚗️ ML Studio — AutoML Tabular con MLJAR
 
-Interfaz visual completa para entrenar, comparar y explicar modelos de ML con soporte **multioutput**.
+Interfaz visual para investigar, entrenar, comparar, evaluar y explicar modelos de machine learning tabular con `mljar-supervised`.
 
 ## Stack
 
 | Módulo | Librería |
 |---|---|
 | UI | Streamlit |
-| Modelos | scikit-learn, XGBoost, LightGBM |
-| Multioutput | `MultiOutputClassifier` / `MultiOutputRegressor` |
-| Explainabilidad | SHAP TreeExplainer, Permutation Importance, PDP |
-| Visualización | Plotly |
+| AutoML | `mljar-supervised` |
+| Modelos base | Linear, Random Forest, Extra Trees, LightGBM, Xgboost, CatBoost, Neural Network, Nearest Neighbors |
+| Evaluación | scikit-learn, Plotly |
+| Explainability | Reportes MLJAR, permutation importance |
 
 ## Instalación
 
 ```bash
-# 1. Clona / copia la carpeta ml_studio
 cd ml_studio
-
-# 2. Instala dependencias
 pip install -r requirements.txt
-
-# 3. Lanza la app
 streamlit run app.py
 ```
 
 ## Flujo del pipeline
 
-```
+```text
 📂 Dataset  →  🔍 EDA  →  🏋️ Train  →  📊 Compare  →  🔬 Evaluate  →  🧠 Explain
 ```
 
 ### 1. 📂 Dataset
-- Sube tu propio CSV / Excel **o** usa uno de los 5 datasets de ejemplo
-- Selecciona múltiples columnas objetivo → activa modo **MULTIOUTPUT**
-- Elige tarea: `classification` o `regression`
+- Sube un CSV/Excel o usa un dataset de ejemplo.
+- Selecciona una o varias variables objetivo.
+- La app infiere clasificación binaria, clasificación multiclase o regresión por target.
+- Puedes corregir manualmente la tarea inferida antes de entrenar.
 
 ### 2. 🔍 EDA & Calidad
-- Resumen de tipos y estadísticas
-- Histogramas, scatter plots, boxplots
-- Matriz de correlación interactiva
-- Detección de nulos y outliers (IQR)
+- Resumen de tipos, nulos, duplicados, distribuciones, correlaciones y outliers.
+- El entrenamiento guarda un `quality_report.json` por corrida.
 
-### 3. 🏋️ Entrenar Modelos
-- Selecciona cualquier combinación de modelos (LR, RF, XGBoost, LightGBM, SVM, KNN, etc.)
-- Control de test size y CV folds
-- En modo multioutput usa automáticamente `MultiOutputClassifier` / `MultiOutputRegressor`
-- Métricas individuales por target + promedio global
+### 3. 🏋️ Entrenar
+- Ejecuta un `AutoML` independiente por cada target.
+- Excluye todos los targets de las features para evitar leakage.
+- Usa holdout externo reproducible para evaluar el mejor modelo por target.
+- Conserva el reporte completo de MLJAR en `artifacts/automl_runs/{run_id}/{target}/mljar/`.
 
-### 4. 📊 Comparar Modelos
-- Tabla de ranking con highlight del mejor modelo
-- Gráficas de barras por métrica
-- **Radar chart** normalizado para comparación visual holística
-- Desglose por target individual (multioutput)
+### 4. 📊 Comparar
+- Muestra la tabla final target × tipo de modelo.
+- Cada celda contiene el mejor valor de la métrica primaria para ese target y tipo de modelo.
+- Clasificación usa `f1` y se maximiza; regresión usa `rmse` y se minimiza.
 
-### 5. 🔬 Evaluar Modelos
-- **Clasificación:** Matriz de confusión (con normalización), reporte completo, curvas ROC y PR
-- **Regresión:** Real vs Predicho, análisis de residuos, Q-Q plot, histograma de errores
-- Vista multioutput: métricas lado a lado para todos los targets
+### 5. 🔬 Evaluar
+- Clasificación: accuracy, F1, precision, recall, matriz de confusión y curvas binarias cuando hay probabilidades.
+- Regresión: R², MAE, RMSE, MAPE, real vs predicho, residuos y distribución de error.
 
-### 6. 🧠 Explainabilidad
-- **Feature Importance nativa** (árboles) con importancia acumulada
-- **Permutation Importance** (model-agnostic, funciona con cualquier modelo)
-- **Partial Dependence Plots** con rug plot de distribución real
-- **SHAP TreeExplainer:** beeswarm plot, waterfall por observación
-- **Predicción manual:** ingresa valores custom y obtén predicción en tiempo real
+### 6. 🧠 Explainability
+- Abre artefactos explicativos del reporte MLJAR.
+- Calcula permutation importance sobre el mejor AutoML por target.
+- Permite predicción manual para el target seleccionado.
 
-## Modelos disponibles
+## Artefactos
 
-### Clasificación
-`lr` · `rf` · `xgboost` · `lightgbm` · `dt` · `knn` · `gbc` · `et` · `svm` · `nb`
+Cada corrida crea:
 
-### Regresión
-`lr` · `ridge` · `lasso` · `rf` · `xgboost` · `lightgbm` · `gbr` · `et` · `dt` · `knn`
+```text
+artifacts/automl_runs/{run_id}/
+  run_manifest.json
+  quality_report.json
+  final_matrix.csv
+  target_summary.csv
+  {target}/
+    target_manifest.json
+    leaderboard.csv
+    holdout_metrics.json
+    predictions.csv
+    plots/*.html
+    mljar/
+```
 
 ## Datasets de ejemplo incluidos
 
-| Dataset | Tarea | Targets |
-|---|---|---|
-| 🏠 Housing | Regresión multioutput | `price_eur`, `rent_eur`, `quality_score` |
-| 🌸 Iris | Clasificación | `target` |
-| 💳 Credit Risk | Clasificación multioutput | `default`, `fraud_flag` |
-| 🌡️ Energy | Regresión multioutput | `heating_load`, `cooling_load` |
-| 🍷 Wine Quality | Regresión | `target` |
+| Dataset | Targets sugeridos |
+|---|---|
+| 🏠 Housing | `price_eur`, `rent_eur`, `quality_score` |
+| 🌸 Iris | `target` |
+| 💳 Credit Risk | `default`, `fraud_flag` |
+| 🌡️ Energy | `heating_load`, `cooling_load` |
+| 🍷 Wine Quality | `target` |
