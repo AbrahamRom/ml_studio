@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+    --bg:        #0d0f14;
+    --surface:   #141720;
+    --border:    #252a38;
+    --accent:    #5b6af0;
+    --accent2:   #2dd4bf;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --danger:    #f43f5e;
+    --success:   #22c55e;
+}
+
+html, body, [data-testid="stAppViewContainer"] {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-family: 'DM Sans', sans-serif;
+}
+
+[data-testid="stSidebar"] {
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+}
+
+[data-testid="stSidebar"] * {
+    color: var(--text) !important;
+}
+
+h1, h2, h3 {
+    font-family: 'Space Mono', monospace !important;
+}
+
+.stButton > button {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.78rem !important;
+    padding: 0.5rem 1.2rem !important;
+    transition: opacity .2s;
+}
+
+.stButton > button:hover {
+    opacity: 0.85 !important;
+}
+
+.stDataFrame,
+.stTable {
+    border: 1px solid var(--border) !important;
+    border-radius: 8px;
+}
+
+.metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.4rem;
+    text-align: center;
+}
+
+.metric-card .val {
+    font-family: 'Space Mono', monospace;
+    font-size: 1.8rem;
+    color: var(--accent2);
+    font-weight: 700;
+}
+
+.metric-card .label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.section-header {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+div[data-testid="stSelectbox"] > div,
+div[data-testid="stMultiSelect"] > div {
+    background: var(--surface) !important;
+    border-color: var(--border) !important;
+    color: var(--text) !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.72rem !important;
+    color: var(--muted) !important;
+}
+
+.stTabs [aria-selected="true"] {
+    color: var(--accent2) !important;
+    border-bottom-color: var(--accent2) !important;
+}
+
+.tag {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.65rem;
+    font-family: 'Space Mono', monospace;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 4px;
+}
+
+.tag.green {
+    background: var(--success);
+    color: #000;
+}
+
+.tag.red {
+    background: var(--danger);
+}
+
+.tag.teal {
+    background: var(--accent2);
+    color: #000;
+}
