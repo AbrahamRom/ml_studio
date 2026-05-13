@@ -32,6 +32,44 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
         adjusted_r2 = float(1 - (1 - r2) * (len(y_true) - 1) / (len(y_true) - n_features - 1))
     smape_denom = np.abs(y_true) + np.abs(y_pred)
     smape = float(np.mean(np.where(smape_denom == 0, 0.0, np.abs(y_true - y_pred) / smape_denom)) * 200)
+    scale = float(np.nanmean(np.abs(y_true)))
+    if not np.isfinite(scale) or scale <= 1e-9:
+        scale = float(np.nanstd(y_true))
+    if not np.isfinite(scale) or scale <= 1e-9:
+        scale = 1.0
+
+    def _bounded_score(value: float | None, *, scale_value: float | None = None, upper_bound: float | None = None) -> float | None:
+        if value is None or not np.isfinite(value):
+            return None
+        if scale_value is not None:
+            return float(1.0 / (1.0 + (value / scale_value)))
+        if upper_bound is not None:
+            return float(np.clip((value + upper_bound) / (2.0 * upper_bound), 0.0, 1.0))
+        return float(np.clip(value, 0.0, 1.0))
+
+    component_scores = {
+        "r2_adjusted": _bounded_score(adjusted_r2 if adjusted_r2 is not None else r2, upper_bound=1.0),
+        "rmse": _bounded_score(float(np.sqrt(mse)), scale_value=scale),
+        "mae": _bounded_score(float(mean_absolute_error(y_true, y_pred)), scale_value=scale),
+        "smape": _bounded_score(smape, scale_value=100.0),
+        "mape": _bounded_score(mape, scale_value=100.0) if mape is not None else None,
+    }
+    weights = {
+        "r2_adjusted": 0.40,
+        "rmse": 0.25,
+        "mae": 0.15,
+        "smape": 0.15,
+        "mape": 0.05,
+    }
+    present_scores = {
+        name: score for name, score in component_scores.items() if score is not None
+    }
+    total_weight = sum(weights[name] for name in present_scores)
+    global_score = None
+    if total_weight > 0:
+        global_score = float(
+            sum(weights[name] * score for name, score in present_scores.items()) / total_weight
+        )
     return {
         "r2": r2,
         "r2_adjusted": adjusted_r2,
@@ -40,6 +78,7 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
         "rmse": float(np.sqrt(mse)),
         "mape": mape,
         "smape": smape,
+        "score_global": global_score,
     }
 
 

@@ -80,3 +80,11 @@ def test_regression_metrics_include_adjusted_r2_and_smape():
     assert metrics["r2"] > 0
     assert metrics["r2_adjusted"] is not None
     assert metrics["smape"] >= 0
+    assert metrics["score_global"] is not None
+    assert 0 <= metrics["score_global"] <= 1
+
+
+def test_regression_metrics_global_score_rewards_perfect_predictions():
+    metrics = regression_metrics([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0], n_features=2)
+
+    assert metrics["score_global"] == 1.0

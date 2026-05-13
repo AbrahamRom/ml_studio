@@ -49,7 +49,7 @@ streamlit run app.py
 
 ### 5. 🔬 Evaluar
 - Clasificación: accuracy, F1, precision, recall, matriz de confusión y curvas binarias cuando hay probabilidades.
-- Regresión: R², R² ajustado, MAE, RMSE, MAPE, SMAPE, real vs predicho, residuos y distribución de error.
+- Regresión: score global compuesto, R², R² ajustado, MAE, RMSE, MAPE, SMAPE, real vs predicho, residuos y distribución de error.
 
 ### 6. 🧠 Explainability
 - Abre artefactos explicativos del reporte MLJAR.
