@@ -1,5 +1,6 @@
 import pandas as pd
 
+from ml_pipeline.automl_runner import _collect_model_metrics
 from ml_pipeline.artifacts import create_run_dir, save_json
 from ml_pipeline.comparison import build_final_matrix
 from ml_pipeline.metrics import regression_metrics
@@ -88,3 +89,33 @@ def test_regression_metrics_global_score_rewards_perfect_predictions():
     metrics = regression_metrics([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0], n_features=2)
 
     assert metrics["score_global"] == 1.0
+
+
+def test_collect_model_metrics_builds_per_model_table_for_regression():
+    class DummyModel:
+        def __init__(self, name: str, model_type: str):
+            self.name = name
+            self.learner_params = {"model_type": model_type}
+
+        def predict(self, X):
+            return pd.Series([1.0, 2.0, 3.0, 4.0], index=X.index)
+
+        def get_name(self):
+            return self.name
+
+    class DummyAutoML:
+        def __init__(self):
+            self._models = [DummyModel("model_a", "Linear")]
+            self._stacked_models = []
+
+    X_test = pd.DataFrame({"x": [10, 20, 30, 40]})
+    y_test = pd.Series([1.0, 2.0, 3.0, 4.0])
+
+    table = _collect_model_metrics(DummyAutoML(), X_test, y_test, "regression", n_features=1)
+
+    assert list(table["model_name"]) == ["model_a"]
+    assert list(table["model_type"]) == ["Linear"]
+    assert list(table["model_class"]) == ["DummyModel"]
+    assert table.loc[0, "score_global"] == 1.0
+    assert table.loc[0, "r2_adjusted"] == 1.0
+    assert table.loc[0, "smape"] == 0.0

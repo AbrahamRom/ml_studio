@@ -23,7 +23,9 @@ targets = list(target_results.keys())
 
 st.caption(f"Corrida `{run['run_id']}` · Artefactos `{run['base_path']}`")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🏁 Matriz final", "🏅 Leaderboard", "📉 Barras", "📁 Artefactos"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🏁 Matriz final", "🏅 Leaderboard", "📉 Barras", "📁 Artefactos", "🧮 Métricas por modelo"]
+)
 
 
 def _direction_for(target: str) -> str:
@@ -114,3 +116,47 @@ with tab4:
             }
         )
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+with tab5:
+    target = st.selectbox("Target con métricas detalladas", targets, key="detailed_metrics_target")
+    result = target_results[target]
+    per_model_metrics = result.get("per_model_metrics")
+
+    st.markdown(f"### `{target}` · métricas de holdout por modelo")
+    st.caption("Se calculan con las predicciones de cada modelo interno sobre el holdout.")
+
+    if per_model_metrics is None or per_model_metrics.empty:
+        st.info("No hay métricas por modelo disponibles para este target.")
+    else:
+        detailed_df = per_model_metrics.copy()
+        numeric_metric_columns = [
+            column
+            for column in detailed_df.columns
+            if column not in {"model_name", "model_type", "evaluation_error"}
+            and pd.api.types.is_numeric_dtype(detailed_df[column])
+        ]
+
+        default_sort_column = None
+        if "score_global" in numeric_metric_columns:
+            default_sort_column = "score_global"
+        elif result["config"]["task"] == "regression" and result["config"]["primary_metric"] in numeric_metric_columns:
+            default_sort_column = result["config"]["primary_metric"]
+        elif numeric_metric_columns:
+            default_sort_column = numeric_metric_columns[0]
+
+        if numeric_metric_columns:
+            sort_column = st.selectbox(
+                "Ordenar por",
+                numeric_metric_columns,
+                index=numeric_metric_columns.index(default_sort_column) if default_sort_column in numeric_metric_columns else 0,
+                key=f"sort_detailed_metrics_{target}",
+            )
+            lower_is_better = {"rmse", "mae", "mape", "mse", "smape"}
+            ascending = sort_column in lower_is_better or (
+                sort_column == result["config"]["primary_metric"] and result["config"]["direction"] == "min"
+            )
+            if sort_column == "score_global":
+                ascending = False
+            detailed_df = detailed_df.sort_values(sort_column, ascending=ascending)
+
+        st.dataframe(detailed_df.round(4), use_container_width=True, hide_index=True)

@@ -61,6 +61,104 @@ def _best_leaderboard_row(leaderboard: pd.DataFrame, direction: str) -> dict:
     return leaderboard.loc[idx].to_dict()
 
 
+def _model_display_name(model, fallback_index: int) -> str:
+    get_name = getattr(model, "get_name", None)
+    if callable(get_name):
+        try:
+            value = get_name()
+            if value:
+                return str(value)
+        except Exception:
+            pass
+    for attribute_name in ("name", "model_name", "model_id"):
+        value = getattr(model, attribute_name, None)
+        if value:
+            return str(value)
+    return f"model_{fallback_index}"
+
+
+def _model_family_name(model) -> str:
+    learner_params = getattr(model, "learner_params", None)
+    if isinstance(learner_params, dict):
+        family = learner_params.get("model_type")
+        if family:
+            return str(family)
+
+    model_type = getattr(model, "model_type", None)
+    if model_type:
+        return str(model_type)
+
+    return model.__class__.__name__
+
+
+def _collect_model_metrics(
+    automl,
+    X_test: pd.DataFrame,
+    y_test,
+    task: str,
+    n_features: int,
+) -> pd.DataFrame:
+    rows: list[dict] = []
+    models = list(getattr(automl, "_models", []) or [])
+    stacked_models = list(getattr(automl, "_stacked_models", []) or [])
+    all_models = models + stacked_models
+
+    seen_names: set[str] = set()
+    for index, model in enumerate(all_models, start=1):
+        model_name = _model_display_name(model, index)
+        if model_name in seen_names:
+            continue
+        seen_names.add(model_name)
+
+        row = {
+            "model_name": model_name,
+            "model_type": _model_family_name(model),
+            "model_class": model.__class__.__name__,
+        }
+
+        try:
+            y_pred = model.predict(X_test)
+            proba = None
+            if task == "classification" and hasattr(model, "predict_proba"):
+                try:
+                    proba = model.predict_proba(X_test)
+                except Exception:
+                    proba = None
+
+            row.update(compute_holdout_metrics(task, y_test, y_pred, proba, n_features=n_features))
+        except Exception as exc:
+            row["evaluation_error"] = str(exc)
+
+        rows.append(row)
+
+    metrics_df = pd.DataFrame(rows)
+    if metrics_df.empty:
+        return metrics_df
+
+    metric_order = [
+        "score_global",
+        "r2_adjusted",
+        "r2",
+        "rmse",
+        "mae",
+        "mape",
+        "smape",
+        "accuracy",
+        "f1",
+        "precision",
+        "recall",
+        "roc_auc",
+        "roc_auc_ovr",
+    ]
+    ordered_columns = [
+        column
+        for column in ["model_name", "model_type", *metric_order, "evaluation_error"]
+        if column in metrics_df.columns
+    ]
+    remaining_columns = [column for column in metrics_df.columns if column not in ordered_columns]
+    return metrics_df[ordered_columns + remaining_columns]
+
+
 def run_target_automl(
     df: pd.DataFrame,
     target: str,
@@ -136,6 +234,13 @@ def run_target_automl(
         config["task"], y_test, y_pred, proba, n_features=len(feature_cols)
     )
     leaderboard = automl.get_leaderboard(original_metric_values=True)
+    per_model_metrics = _collect_model_metrics(
+        automl,
+        X_test,
+        y_test,
+        config["task"],
+        n_features=len(feature_cols),
+    )
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
 
     pred_df = pd.DataFrame(
@@ -151,6 +256,7 @@ def run_target_automl(
         pred_df = pd.concat([pred_df.reset_index(drop=True), proba_df.reset_index(drop=True)], axis=1)
 
     leaderboard_path = save_dataframe(t_dir / "leaderboard.csv", leaderboard)
+    per_model_metrics_path = save_dataframe(t_dir / "per_model_metrics.csv", per_model_metrics)
     predictions_path = save_dataframe(t_dir / "predictions.csv", pred_df)
     metrics_path = save_json(t_dir / "holdout_metrics.json", holdout_metrics)
     plot_paths = save_evaluation_plots(config["task"], plots_path, target, y_test, y_pred, proba)
@@ -163,6 +269,7 @@ def run_target_automl(
         "test_rows": int(len(X_test)),
         "results_path": str(mljar_path),
         "leaderboard_path": str(leaderboard_path),
+        "per_model_metrics_path": str(per_model_metrics_path),
         "predictions_path": str(predictions_path),
         "metrics_path": str(metrics_path),
         "plot_paths": plot_paths,
@@ -176,6 +283,7 @@ def run_target_automl(
         **target_manifest,
         "automl": automl,
         "leaderboard": leaderboard,
+        "per_model_metrics": per_model_metrics,
         "holdout_metrics": holdout_metrics,
         "X_train": X_train,
         "X_test": X_test,
