@@ -61,6 +61,38 @@ def _best_leaderboard_row(leaderboard: pd.DataFrame, direction: str) -> dict:
     return leaderboard.loc[idx].to_dict()
 
 
+def _best_holdout_row(per_model_metrics: pd.DataFrame, config: dict) -> dict:
+    if per_model_metrics.empty:
+        return {}
+
+    preferred_columns = [config.get("primary_metric"), "score_global"]
+    numeric_columns = [
+        column
+        for column in per_model_metrics.columns
+        if column not in {"model_name", "model_type", "model_class", "evaluation_error"}
+        and pd.api.types.is_numeric_dtype(per_model_metrics[column])
+    ]
+
+    metric_column = next(
+        (column for column in preferred_columns if column and column in numeric_columns),
+        None,
+    )
+    if metric_column is None:
+        metric_column = numeric_columns[0] if numeric_columns else None
+    if metric_column is None:
+        return {}
+
+    direction = config.get("direction", "max")
+    metric_values = pd.to_numeric(per_model_metrics[metric_column], errors="coerce")
+    if metric_values.dropna().empty:
+        return {}
+
+    idx = metric_values.idxmax() if direction == "max" else metric_values.idxmin()
+    best_row = per_model_metrics.loc[idx].to_dict()
+    best_row["selected_metric"] = metric_column
+    return best_row
+
+
 def _model_display_name(model, fallback_index: int) -> str:
     get_name = getattr(model, "get_name", None)
     if callable(get_name):
@@ -266,6 +298,7 @@ def run_target_automl(
         n_features=len(feature_cols),
     )
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
+    best_holdout_row = _best_holdout_row(per_model_metrics, config)
 
     pred_df = pd.DataFrame(
         {
@@ -297,9 +330,13 @@ def run_target_automl(
         "predictions_path": str(predictions_path),
         "metrics_path": str(metrics_path),
         "plot_paths": plot_paths,
-        "best_model_name": best_row.get("name"),
-        "best_model_type": best_row.get("model_type"),
-        "best_metric_value": best_row.get("metric_value"),
+        "best_model_name": best_holdout_row.get("model_name"),
+        "best_model_type": best_holdout_row.get("model_type"),
+        "best_metric_value": best_holdout_row.get(best_holdout_row.get("selected_metric")),
+        "best_model_metric": best_holdout_row.get("selected_metric"),
+        "internal_best_model_name": best_row.get("name"),
+        "internal_best_model_type": best_row.get("model_type"),
+        "internal_best_metric_value": best_row.get("metric_value"),
     }
     save_json(t_dir / "target_manifest.json", target_manifest)
 

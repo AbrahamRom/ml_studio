@@ -38,7 +38,7 @@ def _primary_metric_for(target: str) -> str:
 
 with tab1:
     st.markdown("### Tabla final target × tipo de modelo")
-    st.caption("Cada celda contiene el mejor valor del tipo de modelo para ese target.")
+    st.caption("Cada celda contiene el mejor valor del tipo de modelo para ese target, usando el holdout real.")
 
     def highlight_row(row):
         target = row.name
@@ -67,13 +67,13 @@ with tab2:
     leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
     leaderboard = leaderboard.sort_values("metric_value", ascending=ascending)
 
-    st.markdown(f"### `{target}` · métrica `{_primary_metric_for(target)}`")
+    st.markdown(f"### `{target}` · leaderboard interno de mljar · métrica `{_primary_metric_for(target)}`")
     st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
 
     best = leaderboard.iloc[0] if not leaderboard.empty else None
     if best is not None:
         st.success(
-            f"Mejor candidato: **{best['name']}** · tipo `{best['model_type']}` · "
+            f"Mejor candidato interno: **{best['name']}** · tipo `{best['model_type']}` · "
             f"score `{best['metric_value']:.4f}`"
         )
 

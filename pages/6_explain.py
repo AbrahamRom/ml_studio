@@ -29,7 +29,7 @@ X_test = result["X_test"]
 feature_cols = result["feature_cols"]
 
 st.markdown(
-    f"**Target:** `{target}` · **Mejor modelo:** `{result.get('best_model_name')}` · "
+    f"**Target:** `{target}` · **Mejor modelo según holdout real:** `{result.get('best_model_name')}` · "
     f"**Tipo:** `{result.get('best_model_type')}`"
 )
 st.caption(f"Reporte mljar: `{result['results_path']}`")

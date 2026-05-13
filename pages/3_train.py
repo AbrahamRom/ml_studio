@@ -180,7 +180,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
     st.success(f"✅ Corrida `{run_id}` completada. Artefactos: `{run_path}`")
     st.markdown("### Tabla final target × tipo de modelo")
     st.dataframe(compare_df.round(4), use_container_width=True)
-    st.markdown("### Mejor modelo por target")
+    st.markdown("### Mejor modelo por target según holdout real")
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 elif st.session_state.automl_run:
@@ -189,6 +189,6 @@ elif st.session_state.automl_run:
     st.caption(f"Artefactos: `{run['base_path']}`")
     st.markdown("### Tabla final target × tipo de modelo")
     st.dataframe(run["compare_df"].round(4), use_container_width=True)
-    st.markdown("### Mejor modelo por target")
+    st.markdown("### Mejor modelo por target según holdout real")
     st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
     st.info("Ve a Compare / Evaluate / Explainability para más análisis.")

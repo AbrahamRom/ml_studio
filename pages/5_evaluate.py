@@ -31,7 +31,7 @@ proba = result.get("proba")
 
 st.markdown(
     f"**Target:** `{target}` · **Tarea:** `{config['ml_task']}` · "
-    f"**Mejor modelo:** `{result.get('best_model_name')}`"
+    f"**Mejor modelo según holdout real:** `{result.get('best_model_name')}`"
 )
 st.caption(f"Reporte mljar: `{result['results_path']}`")
 st.divider()
