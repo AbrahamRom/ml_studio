@@ -132,7 +132,9 @@ def run_target_automl(
         except Exception:
             proba = None
 
-    holdout_metrics = compute_holdout_metrics(config["task"], y_test, y_pred, proba)
+    holdout_metrics = compute_holdout_metrics(
+        config["task"], y_test, y_pred, proba, n_features=len(feature_cols)
+    )
     leaderboard = automl.get_leaderboard(original_metric_values=True)
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
 

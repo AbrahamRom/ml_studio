@@ -128,11 +128,16 @@ if config["task"] == "classification":
         st.dataframe(preview.head(100), use_container_width=True)
 
 else:
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("R²", f"{metrics.get('r2', 0):.4f}")
-    c2.metric("MAE", f"{metrics.get('mae', 0):.4f}")
-    c3.metric("RMSE", f"{metrics.get('rmse', 0):.4f}")
-    c4.metric("MAPE", "-" if metrics.get("mape") is None else f"{metrics['mape']:.2f}%")
+    c2.metric(
+        "R² ajustado",
+        "-" if metrics.get("r2_adjusted") is None else f"{metrics['r2_adjusted']:.4f}",
+    )
+    c3.metric("MAE", f"{metrics.get('mae', 0):.4f}")
+    c4.metric("RMSE", f"{metrics.get('rmse', 0):.4f}")
+    c5.metric("MAPE", "-" if metrics.get("mape") is None else f"{metrics['mape']:.2f}%")
+    c6.metric("SMAPE", f"{metrics.get('smape', 0):.2f}%")
 
     residuals = y_true - y_pred
     tab1, tab2, tab3, tab4 = st.tabs(

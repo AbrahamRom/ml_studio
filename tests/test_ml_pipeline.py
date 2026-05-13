@@ -2,6 +2,7 @@ import pandas as pd
 
 from ml_pipeline.artifacts import create_run_dir, save_json
 from ml_pipeline.comparison import build_final_matrix
+from ml_pipeline.metrics import regression_metrics
 from ml_pipeline.quality import analyze_data_quality
 from ml_pipeline.tasks import infer_target_task
 
@@ -71,3 +72,11 @@ def test_build_final_matrix_respects_metric_direction():
     assert matrix.loc["class_target", "Linear"] == 0.75
     assert matrix.loc["reg_target", "Linear"] == 10.0
     assert matrix.loc["reg_target", "Random Forest"] == 9.0
+
+
+def test_regression_metrics_include_adjusted_r2_and_smape():
+    metrics = regression_metrics([3.0, 5.0, 7.0, 9.0], [2.5, 5.5, 6.5, 9.5], n_features=2)
+
+    assert metrics["r2"] > 0
+    assert metrics["r2_adjusted"] is not None
+    assert metrics["smape"] >= 0

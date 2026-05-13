@@ -18,7 +18,7 @@ from sklearn.metrics import (
 )
 
 
-def regression_metrics(y_true, y_pred) -> dict:
+def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     mse = mean_squared_error(y_true, y_pred)
@@ -26,12 +26,20 @@ def regression_metrics(y_true, y_pred) -> dict:
     mape = None
     if not np.isnan(denom).all():
         mape = float(np.nanmean(np.abs((y_true - y_pred) / denom)) * 100)
+    r2 = float(r2_score(y_true, y_pred))
+    adjusted_r2 = None
+    if n_features is not None and len(y_true) > (n_features + 1):
+        adjusted_r2 = float(1 - (1 - r2) * (len(y_true) - 1) / (len(y_true) - n_features - 1))
+    smape_denom = np.abs(y_true) + np.abs(y_pred)
+    smape = float(np.mean(np.where(smape_denom == 0, 0.0, np.abs(y_true - y_pred) / smape_denom)) * 200)
     return {
-        "r2": float(r2_score(y_true, y_pred)),
+        "r2": r2,
+        "r2_adjusted": adjusted_r2,
         "mae": float(mean_absolute_error(y_true, y_pred)),
         "mse": float(mse),
         "rmse": float(np.sqrt(mse)),
         "mape": mape,
+        "smape": smape,
     }
 
 
@@ -64,7 +72,7 @@ def classification_metrics(y_true, y_pred, proba=None) -> dict:
     return metrics
 
 
-def compute_holdout_metrics(task: str, y_true, y_pred, proba=None) -> dict:
+def compute_holdout_metrics(task: str, y_true, y_pred, proba=None, n_features: int | None = None) -> dict:
     if task == "regression":
-        return regression_metrics(y_true, y_pred)
+        return regression_metrics(y_true, y_pred, n_features=n_features)
     return classification_metrics(y_true, y_pred, proba)
