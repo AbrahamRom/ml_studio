@@ -51,7 +51,7 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
         "r2_adjusted": _bounded_score(adjusted_r2 if adjusted_r2 is not None else r2, upper_bound=1.0),
         "rmse": _bounded_score(float(np.sqrt(mse)), scale_value=scale),
         "mae": _bounded_score(float(mean_absolute_error(y_true, y_pred)), scale_value=scale),
-        "smape": _bounded_score(smape, scale_value=100.0),
+        "smape": _bounded_score(smape, scale_value=200.0),
         "mape": _bounded_score(mape, scale_value=100.0) if mape is not None else None,
     }
     weights = {
@@ -82,7 +82,7 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
     }
 
 
-def classification_metrics(y_true, y_pred, proba=None) -> dict:
+def classification_metrics(y_true, y_pred, proba=None, proba_classes=None) -> dict:
     labels = pd.unique(
         pd.concat([pd.Series(y_true), pd.Series(y_pred)], ignore_index=True).dropna()
     ).tolist()
@@ -100,18 +100,49 @@ def classification_metrics(y_true, y_pred, proba=None) -> dict:
     if proba is not None:
         try:
             proba_arr = np.asarray(proba)
-            if len(labels) == 2 and proba_arr.ndim == 2 and proba_arr.shape[1] >= 2:
-                metrics["roc_auc"] = float(roc_auc_score(y_true, proba_arr[:, 1]))
+            classes = list(proba_classes) if proba_classes is not None else None
+
+            if (
+                len(labels) == 2
+                and proba_arr.ndim == 2
+                and proba_arr.shape[1] >= 2
+            ):
+                # Align positive-class probability with provided class order when available.
+                if classes and len(classes) == proba_arr.shape[1]:
+                    positive_label = classes[-1]
+                    positive_idx = classes.index(positive_label)
+                    y_true_binary = (np.asarray(y_true) == positive_label).astype(int)
+                    metrics["roc_auc"] = float(roc_auc_score(y_true_binary, proba_arr[:, positive_idx]))
+                else:
+                    metrics["roc_auc"] = float(roc_auc_score(y_true, proba_arr[:, 1]))
             elif len(labels) > 2 and proba_arr.ndim == 2 and proba_arr.shape[1] == len(labels):
-                metrics["roc_auc_ovr"] = float(
-                    roc_auc_score(y_true, proba_arr, multi_class="ovr", average="weighted")
-                )
+                if classes and len(classes) == proba_arr.shape[1]:
+                    metrics["roc_auc_ovr"] = float(
+                        roc_auc_score(
+                            y_true,
+                            proba_arr,
+                            labels=classes,
+                            multi_class="ovr",
+                            average="weighted",
+                        )
+                    )
+                else:
+                    metrics["roc_auc_ovr"] = float(
+                        roc_auc_score(y_true, proba_arr, multi_class="ovr", average="weighted")
+                    )
         except Exception:
             pass
     return metrics
 
 
-def compute_holdout_metrics(task: str, y_true, y_pred, proba=None, n_features: int | None = None) -> dict:
+def compute_holdout_metrics(
+    task: str,
+    y_true,
+    y_pred,
+    proba=None,
+    n_features: int | None = None,
+    proba_classes=None,
+) -> dict:
     if task == "regression":
         return regression_metrics(y_true, y_pred, n_features=n_features)
-    return classification_metrics(y_true, y_pred, proba)
+    return classification_metrics(y_true, y_pred, proba, proba_classes=proba_classes)

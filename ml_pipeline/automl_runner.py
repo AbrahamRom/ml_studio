@@ -119,13 +119,27 @@ def _collect_model_metrics(
         try:
             y_pred = model.predict(X_test)
             proba = None
+            proba_classes = None
             if task == "classification" and hasattr(model, "predict_proba"):
                 try:
                     proba = model.predict_proba(X_test)
+                    classes_attr = getattr(model, "classes_", None)
+                    if classes_attr is not None:
+                        proba_classes = list(classes_attr)
                 except Exception:
                     proba = None
+                    proba_classes = None
 
-            row.update(compute_holdout_metrics(task, y_test, y_pred, proba, n_features=n_features))
+            row.update(
+                compute_holdout_metrics(
+                    task,
+                    y_test,
+                    y_pred,
+                    proba,
+                    n_features=n_features,
+                    proba_classes=proba_classes,
+                )
+            )
         except Exception as exc:
             row["evaluation_error"] = str(exc)
 
@@ -224,14 +238,24 @@ def run_target_automl(
 
     y_pred = automl.predict(X_test)
     proba = None
+    proba_classes = None
     if config["task"] == "classification":
         try:
             proba = automl.predict_proba(X_test)
+            classes_attr = getattr(automl, "classes_", None)
+            if classes_attr is not None:
+                proba_classes = list(classes_attr)
         except Exception:
             proba = None
+            proba_classes = None
 
     holdout_metrics = compute_holdout_metrics(
-        config["task"], y_test, y_pred, proba, n_features=len(feature_cols)
+        config["task"],
+        y_test,
+        y_pred,
+        proba,
+        n_features=len(feature_cols),
+        proba_classes=proba_classes,
     )
     leaderboard = automl.get_leaderboard(original_metric_values=True)
     per_model_metrics = _collect_model_metrics(
