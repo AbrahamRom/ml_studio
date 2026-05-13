@@ -70,3 +70,90 @@ def build_target_summary(target_results: dict) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _select_best_holdout_row(
+    per_model_metrics: pd.DataFrame,
+    config: dict,
+) -> tuple[pd.Series | None, str | None]:
+    if per_model_metrics is None or per_model_metrics.empty:
+        return None, None
+
+    preferred_columns = [config.get("primary_metric"), "score_global"]
+    numeric_columns = [
+        column
+        for column in per_model_metrics.columns
+        if column not in {"model_name", "model_type", "model_class", "evaluation_error"}
+        and pd.api.types.is_numeric_dtype(per_model_metrics[column])
+    ]
+
+    metric_column = next(
+        (column for column in preferred_columns if column and column in numeric_columns),
+        None,
+    )
+    if metric_column is None and numeric_columns:
+        metric_column = numeric_columns[0]
+    if metric_column is None:
+        return None, None
+
+    metric_values = pd.to_numeric(per_model_metrics[metric_column], errors="coerce")
+    if metric_values.dropna().empty:
+        return None, None
+
+    direction = config.get("direction", "max")
+    idx = metric_values.idxmax() if direction == "max" else metric_values.idxmin()
+    return per_model_metrics.loc[idx], metric_column
+
+
+def build_best_model_metrics(target_results: dict) -> pd.DataFrame:
+    rows = []
+    for target, result in target_results.items():
+        per_model_metrics = result.get("per_model_metrics")
+        if per_model_metrics is None or len(per_model_metrics) == 0:
+            continue
+
+        metrics_df = pd.DataFrame(per_model_metrics)
+        best_name = result.get("best_model_name")
+        best_row = None
+
+        if best_name and "model_name" in metrics_df.columns:
+            match = metrics_df.loc[metrics_df["model_name"] == best_name]
+            if not match.empty:
+                best_row = match.iloc[0]
+
+        selected_metric = result.get("best_model_metric")
+        if best_row is None:
+            best_row, selected_metric = _select_best_holdout_row(
+                metrics_df,
+                result.get("config", {}),
+            )
+
+        if best_row is None:
+            continue
+
+        row = {
+            "Target": target,
+            "Mejor modelo holdout": best_row.get("model_name"),
+            "Tipo holdout": best_row.get("model_type"),
+        }
+        if selected_metric:
+            row["Métrica usada"] = selected_metric
+
+        metric_columns = [
+            column
+            for column in metrics_df.columns
+            if column
+            not in {
+                "model_name",
+                "model_type",
+                "model_class",
+                "evaluation_error",
+            }
+            and pd.api.types.is_numeric_dtype(metrics_df[column])
+        ]
+        for column in metric_columns:
+            row[column] = best_row.get(column)
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)

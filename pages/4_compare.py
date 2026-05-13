@@ -19,6 +19,7 @@ run = st.session_state.automl_run
 target_results = run["target_results"]
 compare_df = run["compare_df"]
 summary_df = run["summary_df"]
+best_metrics_df = run.get("best_model_metrics_df")
 targets = list(target_results.keys())
 
 st.caption(f"Corrida `{run['run_id']}` · Artefactos `{run['base_path']}`")
@@ -57,6 +58,11 @@ with tab1:
 
     st.markdown("### Resumen por target")
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    if best_metrics_df is not None and not best_metrics_df.empty:
+        st.markdown("### Mejor modelo + métricas (holdout real)")
+        st.caption("Cada fila resume el modelo ganador por target con todas sus métricas de holdout.")
+        st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
 
 with tab2:
     target = st.selectbox("Target", targets, key="compare_target")

@@ -5,7 +5,11 @@ import streamlit as st
 
 from ml_pipeline.artifacts import create_run_dir, save_dataframe, save_json
 from ml_pipeline.automl_runner import FULL_MLJAR_ALGORITHMS, run_target_automl
-from ml_pipeline.comparison import build_final_matrix, build_target_summary
+from ml_pipeline.comparison import (
+    build_best_model_metrics,
+    build_final_matrix,
+    build_target_summary,
+)
 from ml_pipeline.quality import analyze_data_quality
 from ml_pipeline.tasks import infer_target_task, task_label
 
@@ -141,8 +145,12 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
 
     compare_df = build_final_matrix(target_results)
     summary_df = build_target_summary(target_results)
+    best_metrics_df = build_best_model_metrics(target_results)
     save_dataframe(run_path / "final_matrix.csv", compare_df.reset_index())
     save_dataframe(run_path / "target_summary.csv", summary_df)
+    best_metrics_path = None
+    if not best_metrics_df.empty:
+        best_metrics_path = save_dataframe(run_path / "best_model_metrics.csv", best_metrics_df)
 
     run_manifest = {
         "run_id": run_id,
@@ -159,6 +167,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
         "quality_report_path": str(run_path / "quality_report.json"),
         "final_matrix_path": str(run_path / "final_matrix.csv"),
         "target_summary_path": str(run_path / "target_summary.csv"),
+        "best_model_metrics_path": str(best_metrics_path) if best_metrics_path else None,
     }
     save_json(run_path / "run_manifest.json", run_manifest)
 
@@ -167,6 +176,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
         "target_results": target_results,
         "compare_df": compare_df,
         "summary_df": summary_df,
+        "best_model_metrics_df": best_metrics_df,
     }
     st.session_state.trained_models = target_results
     st.session_state.best_model = {
@@ -182,6 +192,11 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
     st.dataframe(compare_df.round(4), use_container_width=True)
     st.markdown("### Mejor modelo por target según holdout real")
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.markdown("### Mejor modelo + métricas (holdout real)")
+    if best_metrics_df.empty:
+        st.info("No hay métricas detalladas para el mejor modelo.")
+    else:
+        st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
 
 elif st.session_state.automl_run:
     run = st.session_state.automl_run
@@ -191,4 +206,8 @@ elif st.session_state.automl_run:
     st.dataframe(run["compare_df"].round(4), use_container_width=True)
     st.markdown("### Mejor modelo por target según holdout real")
     st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
+    best_metrics_df = run.get("best_model_metrics_df")
+    if best_metrics_df is not None and not best_metrics_df.empty:
+        st.markdown("### Mejor modelo + métricas (holdout real)")
+        st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
     st.info("Ve a Compare / Evaluate / Explainability para más análisis.")
