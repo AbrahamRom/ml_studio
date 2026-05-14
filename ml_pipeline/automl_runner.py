@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -123,6 +124,58 @@ def _model_family_name(model) -> str:
     return model.__class__.__name__
 
 
+def _all_tracked_models(automl) -> list:
+    models = list(getattr(automl, "_models", []) or [])
+    stacked_models = list(getattr(automl, "_stacked_models", []) or [])
+    return models + stacked_models
+
+
+def _coerce_1d_prediction(output):
+    if output is None:
+        return None
+
+    if isinstance(output, pd.DataFrame):
+        if output.shape[1] == 1:
+            return output.iloc[:, 0].to_numpy()
+        return output.to_numpy().ravel()
+
+    if isinstance(output, pd.Series):
+        return output.to_numpy()
+
+    return np.asarray(output).ravel()
+
+
+def resolve_model_by_name(automl, model_name: str | None):
+    if not model_name:
+        return None
+
+    for index, model in enumerate(_all_tracked_models(automl), start=1):
+        if _model_display_name(model, index) == model_name:
+            return model
+    return None
+
+
+def predict_with_model(automl, model_name: str | None, X_test: pd.DataFrame, task: str):
+    model = resolve_model_by_name(automl, model_name)
+    if model is None:
+        return None, None, None
+
+    y_pred = _coerce_1d_prediction(model.predict(X_test))
+    proba = None
+    proba_classes = None
+    if task == "classification" and hasattr(model, "predict_proba"):
+        try:
+            proba = model.predict_proba(X_test)
+            classes_attr = getattr(model, "classes_", None)
+            if classes_attr is not None:
+                proba_classes = list(classes_attr)
+        except Exception:
+            proba = None
+            proba_classes = None
+
+    return y_pred, proba, proba_classes
+
+
 def _collect_model_metrics(
     automl,
     X_test: pd.DataFrame,
@@ -131,12 +184,8 @@ def _collect_model_metrics(
     n_features: int,
 ) -> pd.DataFrame:
     rows: list[dict] = []
-    models = list(getattr(automl, "_models", []) or [])
-    stacked_models = list(getattr(automl, "_stacked_models", []) or [])
-    all_models = models + stacked_models
-
     seen_names: set[str] = set()
-    for index, model in enumerate(all_models, start=1):
+    for index, model in enumerate(_all_tracked_models(automl), start=1):
         model_name = _model_display_name(model, index)
         if model_name in seen_names:
             continue
@@ -149,7 +198,7 @@ def _collect_model_metrics(
         }
 
         try:
-            y_pred = model.predict(X_test)
+            y_pred = _coerce_1d_prediction(model.predict(X_test))
             proba = None
             proba_classes = None
             if task == "classification" and hasattr(model, "predict_proba"):
@@ -268,7 +317,7 @@ def run_target_automl(
     )
     automl.fit(X_train, y_train)
 
-    y_pred = automl.predict(X_test)
+    y_pred = _coerce_1d_prediction(automl.predict(X_test))
     proba = None
     proba_classes = None
     if config["task"] == "classification":

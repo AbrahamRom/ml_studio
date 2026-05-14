@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ml_pipeline.automl_runner import _collect_model_metrics
+from ml_pipeline.automl_runner import _collect_model_metrics, predict_with_model, resolve_model_by_name
 from ml_pipeline.artifacts import create_run_dir, save_json
 from ml_pipeline.comparison import build_final_matrix
 from ml_pipeline.metrics import regression_metrics
@@ -119,3 +119,35 @@ def test_collect_model_metrics_builds_per_model_table_for_regression():
     assert table.loc[0, "score_global"] == 1.0
     assert table.loc[0, "r2_adjusted"] == 1.0
     assert table.loc[0, "smape"] == 0.0
+
+
+def test_resolve_model_by_name_and_predict_with_model_uses_holdout_winner():
+    class DummyModel:
+        def __init__(self, name: str, value: float, model_type: str = "Linear"):
+            self.name = name
+            self.value = value
+            self.learner_params = {"model_type": model_type}
+
+        def predict(self, X):
+            return pd.Series([self.value] * len(X), index=X.index)
+
+        def get_name(self):
+            return self.name
+
+    class DummyAutoML:
+        def __init__(self):
+            self._models = [DummyModel("internal_best", 10.0), DummyModel("holdout_best", 3.0)]
+            self._stacked_models = []
+
+    automl = DummyAutoML()
+    X_test = pd.DataFrame({"x": [1, 2, 3]})
+
+    model = resolve_model_by_name(automl, "holdout_best")
+    assert model is not None
+    assert model.get_name() == "holdout_best"
+
+    y_pred, proba, proba_classes = predict_with_model(automl, "holdout_best", X_test, "regression")
+
+    assert proba is None
+    assert proba_classes is None
+    assert list(y_pred) == [3.0, 3.0, 3.0]

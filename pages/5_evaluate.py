@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from ml_pipeline.automl_runner import predict_with_model
+
 DARK = dict(
     paper_bgcolor="#0d0f14",
     plot_bgcolor="#141720",
@@ -24,14 +26,33 @@ targets = list(target_results.keys())
 target = st.selectbox("Target a evaluar", targets)
 result = target_results[target]
 config = result["config"]
-metrics = result["holdout_metrics"]
 y_true = result["y_test"].to_numpy()
-y_pred = result["predictions"].to_numpy()
-proba = result.get("proba")
+best_model_name = result.get("best_model_name")
+selected_metrics = result["holdout_metrics"]
+
+per_model_metrics = result.get("per_model_metrics")
+if per_model_metrics is not None and best_model_name and "model_name" in per_model_metrics.columns:
+    match = per_model_metrics.loc[per_model_metrics["model_name"] == best_model_name]
+    if not match.empty:
+        selected_metrics = match.iloc[0].to_dict()
+
+y_pred, proba, selected_model_name = predict_with_model(
+    result.get("automl"),
+    best_model_name,
+    result["X_test"],
+    config["task"],
+)
+if y_pred is None:
+    selected_model_name = best_model_name
+    y_pred = result["predictions"].to_numpy()
+    proba = result.get("proba")
+    st.warning("No se pudo resolver el modelo de holdout; se muestra el modelo interno como respaldo.")
+
+metrics = selected_metrics
 
 st.markdown(
     f"**Target:** `{target}` · **Tarea:** `{config['ml_task']}` · "
-    f"**Mejor modelo según holdout real:** `{result.get('best_model_name')}`"
+    f"**Mejor modelo según holdout real:** `{selected_model_name}`"
 )
 st.caption(f"Reporte mljar: `{result['results_path']}`")
 st.divider()
