@@ -24,9 +24,10 @@ targets = list(target_results.keys())
 target = st.selectbox("Target a explicar", targets)
 result = target_results[target]
 config = result["config"]
-automl = result["automl"]
-X_test = result["X_test"]
-feature_cols = result["feature_cols"]
+automl = result.get("automl")
+X_test = result.get("X_test")
+feature_cols = result.get("feature_cols") or []
+has_model = automl is not None and X_test is not None
 
 st.markdown(
     f"**Target:** `{target}` · **Mejor modelo según holdout real:** `{result.get('best_model_name')}` · "
@@ -68,31 +69,33 @@ with tab2:
     max_repeats = 20
     n_repeats = st.slider("Repeticiones", 3, max_repeats, 8)
     scoring = "neg_root_mean_squared_error" if config["task"] == "regression" else "f1_weighted"
+    if not has_model:
+        st.info("La corrida se cargó desde disco; esta sección requiere el modelo en memoria.")
+    else:
+        if st.button("⚙️ Calcular importancia", use_container_width=True):
+            with st.spinner("Calculando permutation importance..."):
+                try:
+                    from sklearn.inspection import permutation_importance
 
-    if st.button("⚙️ Calcular importancia", use_container_width=True):
-        with st.spinner("Calculando permutation importance..."):
-            try:
-                from sklearn.inspection import permutation_importance
-
-                perm = permutation_importance(
-                    automl,
-                    X_test,
-                    result["y_test"],
-                    scoring=scoring,
-                    n_repeats=n_repeats,
-                    random_state=42,
-                    n_jobs=-1,
-                )
-                perm_df = pd.DataFrame(
-                    {
-                        "Feature": feature_cols,
-                        "Importance": perm.importances_mean,
-                        "Std": perm.importances_std,
-                    }
-                ).sort_values("Importance", ascending=False)
-                st.session_state[f"perm_{run['run_id']}_{target}"] = perm_df
-            except Exception as exc:
-                st.error(f"No se pudo calcular permutation importance: {exc}")
+                    perm = permutation_importance(
+                        automl,
+                        X_test,
+                        result["y_test"],
+                        scoring=scoring,
+                        n_repeats=n_repeats,
+                        random_state=42,
+                        n_jobs=-1,
+                    )
+                    perm_df = pd.DataFrame(
+                        {
+                            "Feature": feature_cols,
+                            "Importance": perm.importances_mean,
+                            "Std": perm.importances_std,
+                        }
+                    ).sort_values("Importance", ascending=False)
+                    st.session_state[f"perm_{run['run_id']}_{target}"] = perm_df
+                except Exception as exc:
+                    st.error(f"No se pudo calcular permutation importance: {exc}")
 
     perm_key = f"perm_{run['run_id']}_{target}"
     if perm_key in st.session_state:
@@ -119,87 +122,94 @@ with tab2:
         st.dataframe(perm_df.round(5), use_container_width=True, hide_index=True)
 
 with tab3:
-    leaderboard = result["leaderboard"].copy()
-    direction = config["direction"]
-    leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
-    leaderboard = leaderboard.sort_values("metric_value", ascending=(direction == "min"))
-    st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
+    leaderboard = result.get("leaderboard")
+    if leaderboard is None or leaderboard.empty:
+        st.info("No hay leaderboard guardado para este target.")
+    else:
+        leaderboard = leaderboard.copy()
+        direction = config["direction"]
+        leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
+        leaderboard = leaderboard.sort_values("metric_value", ascending=(direction == "min"))
+        st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
 
-    model_type_counts = leaderboard["model_type"].value_counts()
-    fig = go.Figure(
-        go.Bar(
-            x=model_type_counts.index,
-            y=model_type_counts.values,
-            marker_color="#2dd4bf",
-            text=model_type_counts.values,
-            textposition="outside",
+        model_type_counts = leaderboard["model_type"].value_counts()
+        fig = go.Figure(
+            go.Bar(
+                x=model_type_counts.index,
+                y=model_type_counts.values,
+                marker_color="#2dd4bf",
+                text=model_type_counts.values,
+                textposition="outside",
+            )
         )
-    )
-    fig.update_layout(**DARK, title="Cantidad de candidatos por tipo", height=360)
-    st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(**DARK, title="Cantidad de candidatos por tipo", height=360)
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab4:
     st.markdown("### Predicción manual")
     st.caption("Completa las primeras features editables; el resto se rellena con mediana o moda del holdout.")
 
-    editable_features = feature_cols[: min(12, len(feature_cols))]
-    input_values = {}
-    groups = [editable_features[i : i + 3] for i in range(0, len(editable_features), 3)]
-    for group in groups:
-        cols = st.columns(len(group))
-        for col_w, feature in zip(cols, group):
-            series = X_test[feature]
-            with col_w:
-                if pd.api.types.is_numeric_dtype(series):
-                    clean = series.dropna()
-                    if clean.empty:
-                        min_value = max_value = value = 0.0
+    if not has_model:
+        st.info("La corrida se cargó desde disco; esta sección requiere el modelo en memoria.")
+    else:
+        editable_features = feature_cols[: min(12, len(feature_cols))]
+        input_values = {}
+        groups = [editable_features[i : i + 3] for i in range(0, len(editable_features), 3)]
+        for group in groups:
+            cols = st.columns(len(group))
+            for col_w, feature in zip(cols, group):
+                series = X_test[feature]
+                with col_w:
+                    if pd.api.types.is_numeric_dtype(series):
+                        clean = series.dropna()
+                        if clean.empty:
+                            min_value = max_value = value = 0.0
+                        else:
+                            min_value = float(clean.min())
+                            max_value = float(clean.max())
+                            value = float(clean.median())
+                        step = (max_value - min_value) / 100 if max_value > min_value else 1.0
+                        input_values[feature] = st.number_input(
+                            feature,
+                            min_value=min_value,
+                            max_value=max_value,
+                            value=value,
+                            step=step,
+                        )
                     else:
-                        min_value = float(clean.min())
-                        max_value = float(clean.max())
-                        value = float(clean.median())
-                    step = (max_value - min_value) / 100 if max_value > min_value else 1.0
-                    input_values[feature] = st.number_input(
-                        feature,
-                        min_value=min_value,
-                        max_value=max_value,
-                        value=value,
-                        step=step,
-                    )
-                else:
-                    options = series.dropna().astype(str).value_counts().head(50).index.tolist()
-                    if not options:
-                        options = [""]
-                    input_values[feature] = st.selectbox(feature, options)
+                        options = series.dropna().astype(str).value_counts().head(50).index.tolist()
+                        if not options:
+                            options = [""]
+                        input_values[feature] = st.selectbox(feature, options)
 
-    for feature in feature_cols:
-        if feature in input_values:
-            continue
-        series = X_test[feature]
-        if pd.api.types.is_numeric_dtype(series):
-            median = series.dropna().median()
-            input_values[feature] = 0.0 if pd.isna(median) else float(median)
-        else:
-            mode = series.mode(dropna=True)
-            input_values[feature] = mode.iloc[0] if not mode.empty else ""
+        for feature in feature_cols:
+            if feature in input_values:
+                continue
+            series = X_test[feature]
+            if pd.api.types.is_numeric_dtype(series):
+                median = series.dropna().median()
+                input_values[feature] = 0.0 if pd.isna(median) else float(median)
+            else:
+                mode = series.mode(dropna=True)
+                input_values[feature] = mode.iloc[0] if not mode.empty else ""
 
-    if st.button("🚀 Predecir", use_container_width=True):
-        row_df = pd.DataFrame([input_values])[feature_cols]
-        try:
-            prediction = automl.predict(row_df)[0]
-            st.markdown("#### Resultado")
-            st.markdown(
-                f'<div class="metric-card"><div class="label">🎯 {target}</div>'
-                f'<div class="val">{prediction}</div></div>',
-                unsafe_allow_html=True,
-            )
-            if config["task"] == "classification":
-                try:
-                    probabilities = automl.predict_proba(row_df)[0]
-                    st.markdown("##### Probabilidades")
-                    for idx, probability in enumerate(probabilities):
-                        st.progress(float(probability), text=f"Clase {idx}: {probability:.1%}")
-                except Exception:
-                    pass
-        except Exception as exc:
-            st.error(f"Error en predicción manual: {exc}")
+        if st.button("🚀 Predecir", use_container_width=True):
+            row_df = pd.DataFrame([input_values])[feature_cols]
+            try:
+                prediction = automl.predict(row_df)[0]
+                st.markdown("#### Resultado")
+                st.markdown(
+                    f'<div class="metric-card"><div class="label">🎯 {target}</div>'
+                    f'<div class="val">{prediction}</div></div>',
+                    unsafe_allow_html=True,
+                )
+                if config["task"] == "classification":
+                    try:
+                        probabilities = automl.predict_proba(row_df)[0]
+                        st.markdown("##### Probabilidades")
+                        for idx, probability in enumerate(probabilities):
+                            st.progress(float(probability), text=f"Clase {idx}: {probability:.1%}")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                st.error(f"Error en predicción manual: {exc}")

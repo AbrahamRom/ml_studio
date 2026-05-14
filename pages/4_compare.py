@@ -2,6 +2,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ml_pipeline.comparison import (
+    build_best_model_metrics,
+    build_final_matrix,
+    build_target_summary,
+)
+
 DARK = dict(
     paper_bgcolor="#0d0f14",
     plot_bgcolor="#141720",
@@ -17,10 +23,17 @@ if st.session_state.automl_run is None:
 
 run = st.session_state.automl_run
 target_results = run["target_results"]
-compare_df = run["compare_df"]
-summary_df = run["summary_df"]
+compare_df = run.get("compare_df")
+summary_df = run.get("summary_df")
 best_metrics_df = run.get("best_model_metrics_df")
 targets = list(target_results.keys())
+
+if compare_df is None or compare_df.empty:
+    compare_df = build_final_matrix(target_results)
+if summary_df is None or summary_df.empty:
+    summary_df = build_target_summary(target_results)
+if best_metrics_df is None or best_metrics_df.empty:
+    best_metrics_df = build_best_model_metrics(target_results)
 
 st.caption(f"Corrida `{run['run_id']}` · Artefactos `{run['base_path']}`")
 
@@ -67,21 +80,27 @@ with tab1:
 with tab2:
     target = st.selectbox("Target", targets, key="compare_target")
     result = target_results[target]
-    leaderboard = result["leaderboard"].copy()
-    direction = _direction_for(target)
-    ascending = direction == "min"
-    leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
-    leaderboard = leaderboard.sort_values("metric_value", ascending=ascending)
+    leaderboard = result.get("leaderboard")
+    if leaderboard is None or leaderboard.empty:
+        st.info("No hay leaderboard guardado para este target.")
+    else:
+        leaderboard = leaderboard.copy()
+        direction = _direction_for(target)
+        ascending = direction == "min"
+        leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
+        leaderboard = leaderboard.sort_values("metric_value", ascending=ascending)
 
-    st.markdown(f"### `{target}` · leaderboard interno de mljar · métrica `{_primary_metric_for(target)}`")
-    st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
-
-    best = leaderboard.iloc[0] if not leaderboard.empty else None
-    if best is not None:
-        st.success(
-            f"Mejor candidato interno: **{best['name']}** · tipo `{best['model_type']}` · "
-            f"score `{best['metric_value']:.4f}`"
+        st.markdown(
+            f"### `{target}` · leaderboard interno de mljar · métrica `{_primary_metric_for(target)}`"
         )
+        st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
+
+        best = leaderboard.iloc[0] if not leaderboard.empty else None
+        if best is not None:
+            st.success(
+                f"Mejor candidato interno: **{best['name']}** · tipo `{best['model_type']}` · "
+                f"score `{best['metric_value']:.4f}`"
+            )
 
 with tab3:
     target = st.selectbox("Target para gráfica", targets, key="bar_target")

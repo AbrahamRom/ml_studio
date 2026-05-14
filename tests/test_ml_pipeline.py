@@ -1,7 +1,13 @@
 import pandas as pd
 
 from ml_pipeline.automl_runner import _collect_model_metrics, predict_with_model, resolve_model_by_name
-from ml_pipeline.artifacts import create_run_dir, save_json
+from ml_pipeline.artifacts import (
+    create_run_dir,
+    list_runs,
+    load_automl_run,
+    save_dataframe,
+    save_json,
+)
 from ml_pipeline.comparison import build_final_matrix
 from ml_pipeline.metrics import regression_metrics
 from ml_pipeline.quality import analyze_data_quality
@@ -42,6 +48,116 @@ def test_create_run_dir_and_save_json(tmp_path):
     assert run_path.exists()
     assert out.exists()
     assert out.read_text(encoding="utf-8").startswith("{")
+
+
+def test_list_runs_reads_run_manifest(tmp_path):
+    run_id, run_path = create_run_dir(tmp_path / "automl_runs")
+    save_json(run_path / "run_manifest.json", {"run_id": run_id, "targets": {"t1": {"target": "t1"}}})
+
+    runs = list_runs(tmp_path / "automl_runs")
+
+    assert len(runs) == 1
+    assert runs[0]["run_id"] == run_id
+    assert runs[0]["targets"] == ["t1"]
+
+
+def test_load_automl_run_loads_saved_artifacts(tmp_path):
+    run_id, run_path = create_run_dir(tmp_path / "automl_runs")
+    target = "target_a"
+    target_path = run_path / target
+    target_path.mkdir(parents=True, exist_ok=True)
+
+    save_dataframe(
+        target_path / "leaderboard.csv",
+        pd.DataFrame(
+            [{"name": "model_a", "model_type": "Linear", "metric_value": 0.91}]
+        ),
+    )
+    save_dataframe(
+        target_path / "per_model_metrics.csv",
+        pd.DataFrame(
+            [{"model_name": "model_a", "model_type": "Linear", "accuracy": 0.91}]
+        ),
+    )
+    save_dataframe(
+        target_path / "predictions.csv",
+        pd.DataFrame(
+            {
+                "row_index": [0, 1],
+                "target": [target, target],
+                "y_true": [1, 0],
+                "y_pred": [1, 0],
+                "proba_0": [0.1, 0.9],
+                "proba_1": [0.9, 0.1],
+            }
+        ),
+    )
+    save_json(
+        target_path / "holdout_metrics.json",
+        {"accuracy": 1.0, "classes": [0, 1], "classification_report": {"0": {"precision": 1.0}}},
+    )
+
+    target_manifest = {
+        "target": target,
+        "config": {
+            "task": "classification",
+            "ml_task": "binary_classification",
+            "primary_metric": "f1",
+            "direction": "max",
+        },
+        "feature_cols": ["x"],
+        "train_rows": 8,
+        "test_rows": 2,
+        "results_path": str(target_path / "mljar"),
+        "leaderboard_path": str(target_path / "leaderboard.csv"),
+        "predictions_path": str(target_path / "predictions.csv"),
+        "metrics_path": str(target_path / "holdout_metrics.json"),
+        "plot_paths": {},
+        "best_model_name": "model_a",
+        "best_model_type": "Linear",
+        "best_metric_value": 0.91,
+        "best_model_metric": "f1",
+        "internal_best_model_name": "model_a",
+        "internal_best_model_type": "Linear",
+        "internal_best_metric_value": 0.91,
+    }
+    save_json(target_path / "target_manifest.json", target_manifest)
+
+    save_dataframe(
+        run_path / "final_matrix.csv",
+        pd.DataFrame({"Target": [target], "Linear": [0.91]}),
+    )
+    save_dataframe(
+        run_path / "target_summary.csv",
+        pd.DataFrame({"Target": [target], "Tarea": ["classification"]}),
+    )
+    save_dataframe(
+        run_path / "best_model_metrics.csv",
+        pd.DataFrame({"Target": [target], "accuracy": [1.0]}),
+    )
+
+    save_json(
+        run_path / "run_manifest.json",
+        {
+            "run_id": run_id,
+            "base_path": str(run_path),
+            "targets": {target: target_manifest},
+            "errors": {},
+            "settings": {"mode": "Perform"},
+            "quality_report_path": str(run_path / "quality_report.json"),
+            "final_matrix_path": str(run_path / "final_matrix.csv"),
+            "target_summary_path": str(run_path / "target_summary.csv"),
+            "best_model_metrics_path": str(run_path / "best_model_metrics.csv"),
+        },
+    )
+
+    run = load_automl_run(run_path)
+    result = run["target_results"][target]
+
+    assert run["run_id"] == run_id
+    assert not result["leaderboard"].empty
+    assert "y_true" in result["prediction_frame"].columns
+    assert result["y_test"] is not None
 
 
 def test_build_final_matrix_respects_metric_direction():

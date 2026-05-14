@@ -42,6 +42,12 @@ streamlit run app.py
 - Usa holdout externo reproducible para evaluar el mejor modelo por target.
 - Conserva el reporte completo de MLJAR en `artifacts/automl_runs/{run_id}/{target}/mljar/`.
 
+### 📦 Cargar corridas guardadas
+- En la sección **Train Models** puedes seleccionar una corrida ya entrenada en `artifacts/automl_runs/`.
+- Compare / Evaluate / Explainability se alimentan de los artefactos guardados sin re-entrenar.
+- Nota: las secciones que requieren el modelo en memoria (permutation importance y predicción manual)
+  quedan deshabilitadas cuando la corrida se carga desde disco.
+
 ### 4. 📊 Comparar
 - Muestra la tabla final target × tipo de modelo.
 - Cada celda contiene el mejor valor de la métrica primaria para ese target y tipo de modelo.

@@ -3,7 +3,13 @@ import warnings
 import pandas as pd
 import streamlit as st
 
-from ml_pipeline.artifacts import create_run_dir, save_dataframe, save_json
+from ml_pipeline.artifacts import (
+    create_run_dir,
+    list_runs,
+    load_automl_run,
+    save_dataframe,
+    save_json,
+)
 from ml_pipeline.automl_runner import FULL_MLJAR_ALGORITHMS, run_target_automl
 from ml_pipeline.comparison import (
     build_best_model_metrics,
@@ -17,8 +23,48 @@ warnings.filterwarnings("ignore")
 
 st.markdown("# 🏋️ Entrenar Modelos")
 
+st.markdown("### 📦 Cargar corrida existente")
+runs = list_runs()
+if not runs:
+    st.info("No hay corridas guardadas en artifacts/automl_runs.")
+else:
+    run_labels = {}
+    for run in runs:
+        target_count = len(run["targets"])
+        suffix = " ⚠️" if run.get("errors") else ""
+        label = f"{run['run_id']} · {target_count} target(s){suffix}"
+        run_labels[label] = run
+
+    selected_label = st.selectbox("Corridas guardadas", list(run_labels.keys()))
+    if st.button("📂 Cargar corrida", use_container_width=True):
+        selected = run_labels[selected_label]
+        loaded_run = load_automl_run(selected["path"])
+        st.session_state.automl_run = loaded_run
+        st.session_state.trained_models = loaded_run.get("target_results")
+        st.session_state.best_model = {
+            target: result.get("best_model_name")
+            for target, result in loaded_run.get("target_results", {}).items()
+        }
+        st.session_state.compare_df = loaded_run.get("compare_df")
+        if st.session_state.target_cols is None:
+            st.session_state.target_cols = list(loaded_run.get("target_results", {}).keys())
+        if st.session_state.target_configs is None:
+            st.session_state.target_configs = {
+                target: result.get("config")
+                for target, result in loaded_run.get("target_results", {}).items()
+            }
+        st.success(f"✅ Corrida `{loaded_run['run_id']}` cargada.")
+        st.caption(f"Artefactos: {loaded_run['base_path']}")
+        if loaded_run.get("errors"):
+            st.warning("Algunos targets fallaron en esta corrida.")
+            st.json(loaded_run.get("errors"))
+
+st.divider()
+
 if st.session_state.df is None or st.session_state.target_cols is None:
     st.warning("⚠️ Carga el dataset y configura los targets primero.")
+    if st.session_state.automl_run is not None:
+        st.info("Ya puedes ir a Compare / Evaluate / Explainability con la corrida cargada.")
     st.stop()
 
 df = st.session_state.df.copy()
@@ -177,6 +223,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
         "compare_df": compare_df,
         "summary_df": summary_df,
         "best_model_metrics_df": best_metrics_df,
+        "source": "trained",
     }
     st.session_state.trained_models = target_results
     st.session_state.best_model = {

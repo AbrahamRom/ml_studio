@@ -26,7 +26,34 @@ targets = list(target_results.keys())
 target = st.selectbox("Target a evaluar", targets)
 result = target_results[target]
 config = result["config"]
-y_true = result["y_test"].to_numpy()
+
+
+def _resolve_saved_predictions(result):
+    prediction_frame = result.get("prediction_frame")
+    if prediction_frame is not None and prediction_frame.empty:
+        prediction_frame = None
+
+    y_true = result.get("y_test")
+    y_pred = result.get("predictions")
+    proba = result.get("proba")
+    row_index = None
+
+    if prediction_frame is not None:
+        if "row_index" in prediction_frame.columns:
+            row_index = prediction_frame["row_index"]
+        if y_true is None and "y_true" in prediction_frame.columns:
+            y_true = prediction_frame["y_true"]
+        if y_pred is None and "y_pred" in prediction_frame.columns:
+            y_pred = prediction_frame["y_pred"]
+        if proba is None:
+            proba_cols = [col for col in prediction_frame.columns if col.startswith("proba_")]
+            if proba_cols:
+                proba = prediction_frame[proba_cols].to_numpy()
+
+    return y_true, y_pred, proba, row_index, prediction_frame
+
+
+y_true, y_pred, proba, row_index, prediction_frame = _resolve_saved_predictions(result)
 best_model_name = result.get("best_model_name")
 selected_metrics = result["holdout_metrics"]
 
@@ -36,17 +63,30 @@ if per_model_metrics is not None and best_model_name and "model_name" in per_mod
     if not match.empty:
         selected_metrics = match.iloc[0].to_dict()
 
-y_pred, proba, selected_model_name = predict_with_model(
-    result.get("automl"),
-    best_model_name,
-    result["X_test"],
-    config["task"],
-)
-if y_pred is None:
-    selected_model_name = best_model_name
-    y_pred = result["predictions"].to_numpy()
-    proba = result.get("proba")
-    st.warning("No se pudo resolver el modelo de holdout; se muestra el modelo interno como respaldo.")
+selected_model_name = best_model_name
+if result.get("automl") is not None and result.get("X_test") is not None:
+    model_pred, model_proba, selected_model_name = predict_with_model(
+        result.get("automl"),
+        best_model_name,
+        result["X_test"],
+        config["task"],
+    )
+    if model_pred is not None:
+        y_pred = model_pred
+        proba = model_proba
+        y_true = result.get("y_test")
+
+if y_pred is None and result.get("predictions") is not None:
+    y_pred = result.get("predictions")
+if y_true is None and result.get("y_test") is not None:
+    y_true = result.get("y_test")
+
+if y_true is None or y_pred is None:
+    st.error("No se encontraron predicciones guardadas para este target.")
+    st.stop()
+
+y_true = np.asarray(y_true)
+y_pred = np.asarray(y_pred)
 
 metrics = selected_metrics
 
@@ -142,11 +182,26 @@ if config["task"] == "classification":
             st.info("Las curvas ROC/PR interactivas se muestran solo para clasificación binaria.")
 
     with tab4:
-        preview = result["X_test"].copy().reset_index(drop=True)
-        preview["y_real"] = y_true
-        preview["y_pred"] = y_pred
-        preview["correcto"] = preview["y_real"] == preview["y_pred"]
-        st.dataframe(preview.head(100), use_container_width=True)
+        if result.get("X_test") is not None:
+            preview = result["X_test"].copy().reset_index(drop=True)
+        elif st.session_state.df is not None and row_index is not None:
+            preview = st.session_state.df.reindex(row_index).reset_index(drop=True)
+        elif prediction_frame is not None:
+            preview = prediction_frame.copy().reset_index(drop=True)
+        else:
+            preview = pd.DataFrame()
+
+        if not preview.empty:
+            preview["y_real"] = y_true
+            preview["y_pred"] = y_pred
+            preview["correcto"] = preview["y_real"] == preview["y_pred"]
+            st.dataframe(preview.head(100), use_container_width=True)
+        else:
+            st.info("No hay features guardadas; se muestran solo las predicciones.")
+            st.dataframe(
+                pd.DataFrame({"y_real": y_true, "y_pred": y_pred}).head(100),
+                use_container_width=True,
+            )
 
 else:
     c1, c2, c3, c4 = st.columns(4)
@@ -237,15 +292,37 @@ else:
         st.plotly_chart(fig3, use_container_width=True)
 
     with tab4:
-        preview = result["X_test"].copy().reset_index(drop=True).head(100)
-        preview[f"{target}_real"] = y_true[:100]
-        preview[f"{target}_pred"] = np.round(y_pred[:100], 4)
-        preview["error"] = np.round(y_true[:100] - y_pred[:100], 4)
-        st.dataframe(preview, use_container_width=True)
+        if result.get("X_test") is not None:
+            preview = result["X_test"].copy().reset_index(drop=True).head(100)
+        elif st.session_state.df is not None and row_index is not None:
+            preview = st.session_state.df.reindex(row_index).reset_index(drop=True).head(100)
+        elif prediction_frame is not None:
+            preview = prediction_frame.copy().reset_index(drop=True).head(100)
+        else:
+            preview = pd.DataFrame()
+
+        if not preview.empty:
+            preview[f"{target}_real"] = y_true[: len(preview)]
+            preview[f"{target}_pred"] = np.round(y_pred[: len(preview)], 4)
+            preview["error"] = np.round(y_true[: len(preview)] - y_pred[: len(preview)], 4)
+            st.dataframe(preview, use_container_width=True)
+        else:
+            st.info("No hay features guardadas; se muestran solo las predicciones.")
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        f"{target}_real": y_true[:100],
+                        f"{target}_pred": np.round(y_pred[:100], 4),
+                        "error": np.round(y_true[:100] - y_pred[:100], 4),
+                    }
+                ),
+                use_container_width=True,
+            )
 
 st.divider()
 with st.expander("Archivos guardados para este target", expanded=False):
-    rows = [{"Artefacto": name, "Ruta": path} for name, path in result["plot_paths"].items()]
+    plot_paths = result.get("plot_paths") or {}
+    rows = [{"Artefacto": name, "Ruta": path} for name, path in plot_paths.items()]
     rows.extend(
         [
             {"Artefacto": "leaderboard", "Ruta": result["leaderboard_path"]},
