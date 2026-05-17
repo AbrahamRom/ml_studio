@@ -11,203 +11,736 @@ from ml_pipeline.comparison import (
     build_target_summary,
 )
 from ml_pipeline.quality import analyze_data_quality
-from ml_pipeline.tasks import infer_target_task, task_label
+from ml_pipeline.tasks import infer_target_task, normalize_target_config, task_label
 
 warnings.filterwarnings("ignore")
 
 st.markdown("# 🏋️ Entrenar Modelos")
 
-if st.session_state.df is None or st.session_state.target_cols is None:
-    st.warning("⚠️ Carga el dataset y configura los targets primero.")
+if st.session_state.df is None:
+    st.warning("⚠️ Carga el dataset primero.")
     st.stop()
 
 df = st.session_state.df.copy()
-targets = st.session_state.target_cols
-target_configs = st.session_state.target_configs or {
-    target: infer_target_task(df[target]) for target in targets
-}
 
-badge = '<span class="tag teal">MULTI-TARGET</span>' if len(targets) > 1 else '<span class="tag">SINGLE TARGET</span>'
-st.markdown(
-    f"**Backend:** `mljar-supervised` &nbsp; {badge} &nbsp; "
-    f"**Targets:** `{'`, `'.join(targets)}`",
-    unsafe_allow_html=True,
-)
-st.caption("Cada target se entrena con un AutoML independiente. Las columnas target se excluyen de las features.")
+tab_automl, tab_dl = st.tabs(["🤖 AutoML (mljar)", "🧠 Deep Learning"])
 
-st.divider()
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 1: AutoML
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_automl:
+    st.markdown("### 🎯 Configurar targets")
+    st.caption("Cada target se entrena con un AutoML independiente. Las columnas target se excluyen de las features.")
 
-st.markdown("### 🎯 Configuración por target")
-config_rows = []
-invalid_targets = []
-for target in targets:
-    config = target_configs[target]
-    if config["ml_task"] == "invalid":
-        invalid_targets.append(target)
-    config_rows.append(
-        {
-            "Target": target,
-            "Tarea": task_label(config["ml_task"]),
-            "Métrica primaria": config["primary_metric"],
-            "Dirección": "↑ maximizar" if config["direction"] == "max" else "↓ minimizar",
-            "Motivo": config["reason"],
-        }
+    targets = st.multiselect(
+        "Variables objetivo (target/s)",
+        options=df.columns.tolist(),
+        default=st.session_state.target_cols or [],
+        help="Selecciona las columnas que quieres predecir.",
+        key="aml_targets",
     )
-st.dataframe(pd.DataFrame(config_rows), use_container_width=True, hide_index=True)
 
-quality = analyze_data_quality(df, targets)
-with st.expander("Calidad de datos antes de entrenar", expanded=False):
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Filas", f"{quality['shape']['rows']:,}")
-    c2.metric("Columnas", quality["shape"]["columns"])
-    c3.metric("Nulos", quality["total_nulls"])
-    c4.metric("Duplicados", quality["duplicate_rows"])
-    if quality["target_issues"]:
-        st.error("Hay targets que no se pueden entrenar.")
-        st.dataframe(pd.DataFrame(quality["target_issues"]), use_container_width=True, hide_index=True)
-    st.dataframe(pd.DataFrame(quality["columns"]), use_container_width=True, hide_index=True)
+    if targets:
+        is_multi = len(targets) > 1
+        badge = '<span class="tag teal">MULTI-TARGET</span>' if is_multi else '<span class="tag">SINGLE TARGET</span>'
+        st.markdown(f"**Modo:** {badge} &nbsp; **Backend:** `mljar-supervised`", unsafe_allow_html=True)
 
-if invalid_targets or quality["target_issues"]:
-    st.error("Corrige los targets inválidos antes de entrenar.")
-    st.stop()
+        st.markdown("#### Tarea por target")
+        task_options = ["binary_classification", "multiclass_classification", "regression"]
+        target_configs = {}
+        blocking_targets = []
 
-st.divider()
-st.markdown("### ⚙️ Opciones de entrenamiento")
+        for target in targets:
+            inferred = infer_target_task(df[target])
+            if inferred["ml_task"] == "invalid":
+                blocking_targets.append(target)
+                st.error(f"`{target}` no es entrenable: {inferred['reason']}")
+                target_configs[target] = inferred
+                continue
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    total_time_limit = st.slider("Tiempo por target", 30, 1800, 180, 30, format="%d s")
-with col2:
-    test_size = st.slider("Holdout test size", 0.1, 0.4, 0.2, 0.05)
-with col3:
-    random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1)
-with col4:
-    mode = st.selectbox("Modo mljar", ["Perform", "Explain", "Compete"], index=0)
-
-with st.expander("Catálogo mljar", expanded=False):
-    st.write(", ".join(FULL_MLJAR_ALGORITHMS))
-    st.caption("Se ejecuta el catálogo completo para cada target y se conserva el reporte de mljar.")
-
-st.divider()
-
-
-def _target_manifest(result: dict) -> dict:
-    keys = [
-        "target",
-        "config",
-        "feature_cols",
-        "train_rows",
-        "test_rows",
-        "results_path",
-        "leaderboard_path",
-        "predictions_path",
-        "metrics_path",
-        "plot_paths",
-        "best_model_name",
-        "best_model_type",
-        "best_metric_value",
-    ]
-    return {key: result.get(key) for key in keys}
-
-
-if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
-    run_id, run_path = create_run_dir()
-    save_json(run_path / "quality_report.json", quality)
-
-    progress = st.progress(0, text="Iniciando corrida AutoML...")
-    target_results = {}
-    errors = {}
-
-    for idx, target in enumerate(targets, start=1):
-        progress.progress((idx - 1) / len(targets), text=f"Entrenando target `{target}`...")
-        try:
-            target_results[target] = run_target_automl(
-                df,
-                target,
-                target_configs[target],
-                all_targets=targets,
-                run_path=run_path,
-                test_size=float(test_size),
-                total_time_limit=int(total_time_limit),
-                mode=mode,
-                random_state=int(random_state),
+            default_idx = task_options.index(inferred["ml_task"])
+            selected_ml_task = st.selectbox(
+                f"`{target}`",
+                task_options,
+                index=default_idx,
+                format_func=task_label,
+                key=f"aml_target_task_{target}",
+                help=inferred["reason"],
             )
-        except Exception as exc:
-            errors[target] = str(exc)
 
-    progress.progress(1.0, text="Finalizando artefactos...")
+            config = normalize_target_config({**inferred, "ml_task": selected_ml_task})
+            if selected_ml_task != inferred["ml_task"]:
+                config["reason"] = f"Override manual. Inferencia original: {task_label(inferred['ml_task'])}."
+            target_configs[target] = config
 
-    if not target_results:
-        save_json(run_path / "run_manifest.json", {"run_id": run_id, "errors": errors})
-        st.error("No se pudo entrenar ningún target.")
-        st.json(errors)
-        st.stop()
+            metric_text = "maximizar" if config["direction"] == "max" else "minimizar"
+            st.caption(
+                f"Inferido: {task_label(inferred['ml_task'])}. "
+                f"Métrica primaria: `{config['primary_metric']}` ({metric_text}). "
+                f"{config['reason']}"
+            )
 
-    compare_df = build_final_matrix(target_results)
-    summary_df = build_target_summary(target_results)
-    best_metrics_df = build_best_model_metrics(target_results)
-    save_dataframe(run_path / "final_matrix.csv", compare_df.reset_index())
-    save_dataframe(run_path / "target_summary.csv", summary_df)
-    best_metrics_path = None
-    if not best_metrics_df.empty:
-        best_metrics_path = save_dataframe(run_path / "best_model_metrics.csv", best_metrics_df)
+        config_rows = []
+        for target in targets:
+            config = target_configs[target]
+            config_rows.append({
+                "Target": target,
+                "Tarea": task_label(config["ml_task"]),
+                "Métrica primaria": config["primary_metric"],
+                "Dirección": "↑ maximizar" if config["direction"] == "max" else "↓ minimizar",
+                "Motivo": config["reason"],
+            })
+        st.dataframe(pd.DataFrame(config_rows), use_container_width=True, hide_index=True)
 
-    run_manifest = {
-        "run_id": run_id,
-        "base_path": str(run_path),
-        "targets": {target: _target_manifest(result) for target, result in target_results.items()},
-        "errors": errors,
-        "settings": {
-            "total_time_limit": int(total_time_limit),
-            "test_size": float(test_size),
-            "random_state": int(random_state),
-            "mode": mode,
-            "algorithms": FULL_MLJAR_ALGORITHMS,
-        },
-        "quality_report_path": str(run_path / "quality_report.json"),
-        "final_matrix_path": str(run_path / "final_matrix.csv"),
-        "target_summary_path": str(run_path / "target_summary.csv"),
-        "best_model_metrics_path": str(best_metrics_path) if best_metrics_path else None,
-    }
-    save_json(run_path / "run_manifest.json", run_manifest)
+        quality = analyze_data_quality(df, targets)
+        with st.expander("Calidad de datos antes de entrenar", expanded=False):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Filas", f"{quality['shape']['rows']:,}")
+            c2.metric("Columnas", quality["shape"]["columns"])
+            c3.metric("Nulos", quality["total_nulls"])
+            c4.metric("Duplicados", quality["duplicate_rows"])
+            if quality["target_issues"]:
+                st.error("Hay targets que no se pueden entrenar.")
+                st.dataframe(pd.DataFrame(quality["target_issues"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(quality["columns"]), use_container_width=True, hide_index=True)
 
-    st.session_state.automl_run = {
-        **run_manifest,
-        "target_results": target_results,
-        "compare_df": compare_df,
-        "summary_df": summary_df,
-        "best_model_metrics_df": best_metrics_df,
-    }
-    st.session_state.trained_models = target_results
-    st.session_state.best_model = {
-        target: result.get("best_model_name") for target, result in target_results.items()
-    }
-    st.session_state.compare_df = compare_df
+        automl_invalid = bool(blocking_targets or quality["target_issues"])
+        if automl_invalid:
+            st.error("Corrige los targets inválidos antes de entrenar AutoML.")
 
-    if errors:
-        st.warning("Algunos targets fallaron; los resultados válidos se conservaron.")
-        st.json(errors)
-    st.success(f"✅ Corrida `{run_id}` completada. Artefactos: `{run_path}`")
-    st.markdown("### Tabla final target × tipo de modelo")
-    st.dataframe(compare_df.round(4), use_container_width=True)
-    st.markdown("### Mejor modelo por target según holdout real")
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    st.markdown("### Mejor modelo + métricas (holdout real)")
-    if best_metrics_df.empty:
-        st.info("No hay métricas detalladas para el mejor modelo.")
-    else:
-        st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
+        st.divider()
+        st.markdown("### ⚙️ Opciones de entrenamiento")
 
-elif st.session_state.automl_run:
-    run = st.session_state.automl_run
-    st.success(f"✅ Corrida AutoML disponible: `{run['run_id']}`")
-    st.caption(f"Artefactos: `{run['base_path']}`")
-    st.markdown("### Tabla final target × tipo de modelo")
-    st.dataframe(run["compare_df"].round(4), use_container_width=True)
-    st.markdown("### Mejor modelo por target según holdout real")
-    st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
-    best_metrics_df = run.get("best_model_metrics_df")
-    if best_metrics_df is not None and not best_metrics_df.empty:
-        st.markdown("### Mejor modelo + métricas (holdout real)")
-        st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
-    st.info("Ve a Compare / Evaluate / Explainability para más análisis.")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            total_time_limit = st.slider("Tiempo por target", 30, 1800, 180, 30, format="%d s", key="aml_time")
+        with col2:
+            test_size = st.slider("Holdout test size", 0.1, 0.4, 0.2, 0.05, key="aml_test")
+        with col3:
+            random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1, key="aml_rs")
+        with col4:
+            mode = st.selectbox("Modo mljar", ["Perform", "Explain", "Compete"], index=0, key="aml_mode")
+
+        with st.expander("Catálogo mljar", expanded=False):
+            st.write(", ".join(FULL_MLJAR_ALGORITHMS))
+
+        st.divider()
+
+        if st.button("✅ Confirmar targets y 🚀 Entrenar AutoML", use_container_width=True, type="primary", disabled=automl_invalid):
+            st.session_state.target_cols = targets
+            st.session_state.target_configs = target_configs
+            st.session_state.task_type = "per_target"
+            st.session_state.multioutput = is_multi
+
+            run_id, run_path = create_run_dir()
+            save_json(run_path / "quality_report.json", quality)
+
+            progress = st.progress(0, text="Iniciando corrida AutoML...")
+            target_results = {}
+            errors = {}
+
+            for idx, target in enumerate(targets, start=1):
+                progress.progress((idx - 1) / len(targets), text=f"Entrenando target `{target}`...")
+                try:
+                    target_results[target] = run_target_automl(
+                        df, target, target_configs[target], all_targets=targets,
+                        run_path=run_path, test_size=float(test_size),
+                        total_time_limit=int(total_time_limit), mode=mode,
+                        random_state=int(random_state),
+                    )
+                except Exception as exc:
+                    errors[target] = str(exc)
+
+            progress.progress(1.0, text="Finalizando artefactos...")
+
+            if not target_results:
+                save_json(run_path / "run_manifest.json", {"run_id": run_id, "errors": errors})
+                st.error("No se pudo entrenar ningún target.")
+                st.json(errors)
+                st.stop()
+
+            compare_df = build_final_matrix(target_results)
+            summary_df = build_target_summary(target_results)
+            best_metrics_df = build_best_model_metrics(target_results)
+            save_dataframe(run_path / "final_matrix.csv", compare_df.reset_index())
+            save_dataframe(run_path / "target_summary.csv", summary_df)
+            best_metrics_path = None
+            if not best_metrics_df.empty:
+                best_metrics_path = save_dataframe(run_path / "best_model_metrics.csv", best_metrics_df)
+
+            def _target_manifest(result):
+                keys = ["target", "config", "feature_cols", "train_rows", "test_rows",
+                        "results_path", "leaderboard_path", "predictions_path",
+                        "metrics_path", "plot_paths", "best_model_name", "best_model_type",
+                        "best_metric_value"]
+                return {key: result.get(key) for key in keys}
+
+            run_manifest = {
+                "run_id": run_id,
+                "base_path": str(run_path),
+                "targets": {target: _target_manifest(result) for target, result in target_results.items()},
+                "errors": errors,
+                "settings": {
+                    "total_time_limit": int(total_time_limit),
+                    "test_size": float(test_size),
+                    "random_state": int(random_state),
+                    "mode": mode,
+                    "algorithms": FULL_MLJAR_ALGORITHMS,
+                },
+                "quality_report_path": str(run_path / "quality_report.json"),
+                "final_matrix_path": str(run_path / "final_matrix.csv"),
+                "target_summary_path": str(run_path / "target_summary.csv"),
+                "best_model_metrics_path": str(best_metrics_path) if best_metrics_path else None,
+            }
+            save_json(run_path / "run_manifest.json", run_manifest)
+
+            st.session_state.automl_run = {
+                **run_manifest,
+                "target_results": target_results,
+                "compare_df": compare_df,
+                "summary_df": summary_df,
+                "best_model_metrics_df": best_metrics_df,
+            }
+            st.session_state.trained_models = target_results
+            st.session_state.best_model = {
+                target: result.get("best_model_name") for target, result in target_results.items()
+            }
+            st.session_state.compare_df = compare_df
+
+            if errors:
+                st.warning("Algunos targets fallaron; los resultados válidos se conservaron.")
+                st.json(errors)
+            st.success(f"✅ Corrida `{run_id}` completada. Artefactos: `{run_path}`")
+            st.markdown("### Tabla final target × tipo de modelo")
+            st.dataframe(compare_df.round(4), use_container_width=True)
+            st.markdown("### Mejor modelo por target según holdout real")
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            st.markdown("### Mejor modelo + métricas (holdout real)")
+            if best_metrics_df.empty:
+                st.info("No hay métricas detalladas para el mejor modelo.")
+            else:
+                st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
+
+        elif st.session_state.automl_run:
+            run = st.session_state.automl_run
+            st.success(f"✅ Corrida AutoML disponible: `{run['run_id']}`")
+            st.caption(f"Artefactos: `{run['base_path']}`")
+            st.markdown("### Tabla final target × tipo de modelo")
+            st.dataframe(run["compare_df"].round(4), use_container_width=True)
+            st.markdown("### Mejor modelo por target según holdout real")
+            st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
+            best_metrics_df = run.get("best_model_metrics_df")
+            if best_metrics_df is not None and not best_metrics_df.empty:
+                st.markdown("### Mejor modelo + métricas (holdout real)")
+                st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
+            st.info("Ve a Compare / Evaluate / Explainability para más análisis.")
+
+    elif st.session_state.target_cols:
+        targets = st.session_state.target_cols
+        target_configs = st.session_state.target_configs or {
+            target: infer_target_task(df[target]) for target in targets
+        }
+        st.info("Targets ya configurados. Entrena o reconfigura arriba.")
+
+        st.divider()
+        st.markdown("### ⚙️ Opciones de entrenamiento")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            total_time_limit = st.slider("Tiempo por target", 30, 1800, 180, 30, format="%d s", key="aml_time2")
+        with col2:
+            test_size = st.slider("Holdout test size", 0.1, 0.4, 0.2, 0.05, key="aml_test2")
+        with col3:
+            random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1, key="aml_rs2")
+        with col4:
+            mode = st.selectbox("Modo mljar", ["Perform", "Explain", "Compete"], index=0, key="aml_mode2")
+
+        if st.button("🚀 Entrenar AutoML", use_container_width=True, type="primary"):
+            st.session_state.target_configs = target_configs
+            run_id, run_path = create_run_dir()
+            quality = analyze_data_quality(df, targets)
+            save_json(run_path / "quality_report.json", quality)
+
+            progress = st.progress(0, text="Iniciando...")
+            target_results = {}
+            errors = {}
+
+            for idx, target in enumerate(targets, start=1):
+                progress.progress((idx - 1) / len(targets), text=f"Target `{target}`...")
+                try:
+                    target_results[target] = run_target_automl(
+                        df, target, target_configs[target], all_targets=targets,
+                        run_path=run_path, test_size=float(test_size),
+                        total_time_limit=int(total_time_limit), mode=mode,
+                        random_state=int(random_state),
+                    )
+                except Exception as exc:
+                    errors[target] = str(exc)
+
+            progress.progress(1.0, text="Finalizando...")
+            if not target_results:
+                st.error("No se pudo entrenar ningún target.")
+                st.json(errors)
+                st.stop()
+
+            compare_df = build_final_matrix(target_results)
+            summary_df = build_target_summary(target_results)
+            best_metrics_df = build_best_model_metrics(target_results)
+            save_dataframe(run_path / "final_matrix.csv", compare_df.reset_index())
+            save_dataframe(run_path / "target_summary.csv", summary_df)
+
+            st.session_state.automl_run = {
+                "run_id": run_id, "base_path": str(run_path),
+                "target_results": target_results, "compare_df": compare_df,
+                "summary_df": summary_df, "best_model_metrics_df": best_metrics_df,
+                "errors": errors,
+            }
+            st.session_state.trained_models = target_results
+            st.session_state.compare_df = compare_df
+            st.success(f"✅ Corrida `{run_id}` completada.")
+            st.dataframe(compare_df.round(4), use_container_width=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2: Deep Learning
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_dl:
+    try:
+        import torch
+        from ml_pipeline.deep_learning import (
+            DL_MODEL_TYPES, DL_DEFAULT_CONFIGS, run_dl_model,
+            optimize_dl_hyperparameters,
+        )
+        torch_available = True
+    except ImportError:
+        torch_available = False
+        st.error("⚠️ PyTorch no está instalado. Ejecuta: `pip install torch`")
+
+    if torch_available:
+        st.caption("Modelos de deep learning: autoencoders, VAE, LSTM y GRU con optimización de hiperparámetros.")
+
+        st.divider()
+        st.markdown("### 🧩 Selección de modelo")
+
+        dl_model_type = st.selectbox(
+            "Tipo de modelo",
+            DL_MODEL_TYPES,
+            format_func=lambda x: {
+                "autoencoder": "Autoencoder (reconstrucción / reducción dimensional)",
+                "vae": "Variational Autoencoder (generativo)",
+                "lstm": "LSTM (secuencial / serie temporal)",
+                "gru": "GRU (secuencial / serie temporal)",
+            }.get(x, x),
+            key="dl_model_type",
+        )
+
+        is_unsupervised = dl_model_type in ("autoencoder", "vae")
+
+        dl_target = None
+        if not is_unsupervised:
+            dl_target = st.selectbox(
+                "Target (variable a predecir)",
+                options=df.columns.tolist(),
+                key="dl_target",
+            )
+
+        st.divider()
+        st.markdown("### ⚙️ Hiperparámetros")
+
+        defaults = DL_DEFAULT_CONFIGS[dl_model_type]
+
+        if dl_model_type in ("autoencoder", "vae"):
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                enc_dims = st.text_input(
+                    "Encoding dims (comma-separated)",
+                    value=",".join(map(str, defaults["encoding_dims"])),
+                    key="dl_enc_dims",
+                )
+            with col2:
+                lr = st.number_input("Learning rate", value=float(defaults["learning_rate"]), step=0.0001, format="%.4f", key="dl_lr_ae")
+            with col3:
+                batch_size = st.number_input("Batch size", value=int(defaults["batch_size"]), step=8, key="dl_bs_ae")
+            with col4:
+                epochs = st.number_input("Epochs", value=int(defaults["epochs"]), step=10, key="dl_ep_ae")
+            with col5:
+                dropout = st.number_input("Dropout", value=float(defaults["dropout"]), step=0.05, min_value=0.0, max_value=0.9, format="%.2f", key="dl_do_ae")
+
+            extra_col1, extra_col2 = st.columns(2)
+            with extra_col1:
+                patience = st.number_input("Early stopping patience", value=int(defaults["patience"]), step=1, key="dl_pat_ae")
+            with extra_col2:
+                if dl_model_type == "vae":
+                    kl_weight = st.number_input("KL weight", value=float(defaults["kl_weight"]), step=0.1, format="%.1f", key="dl_kl")
+                else:
+                    kl_weight = 1.0
+
+            dl_config = {
+                "encoding_dims": [int(x.strip()) for x in enc_dims.split(",") if x.strip()],
+                "learning_rate": lr,
+                "batch_size": batch_size,
+                "epochs": epochs,
+                "dropout": dropout,
+                "patience": patience,
+            }
+            if dl_model_type == "vae":
+                dl_config["kl_weight"] = kl_weight
+
+        else:
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                hidden_dim = st.number_input("Hidden dim", value=int(defaults["hidden_dim"]), step=16, key="dl_hd")
+            with col2:
+                num_layers = st.number_input("Num layers", value=int(defaults["num_layers"]), min_value=1, max_value=8, step=1, key="dl_nl")
+            with col3:
+                seq_length = st.number_input("Sequence length", value=int(defaults["seq_length"]), min_value=2, step=1, key="dl_sl")
+            with col4:
+                lr = st.number_input("Learning rate", value=float(defaults["learning_rate"]), step=0.0001, format="%.4f", key="dl_lr_seq")
+            with col5:
+                batch_size = st.number_input("Batch size", value=int(defaults["batch_size"]), step=8, key="dl_bs_seq")
+
+            col6, col7, col8, col9 = st.columns(4)
+            with col6:
+                epochs = st.number_input("Epochs", value=int(defaults["epochs"]), step=10, key="dl_ep_seq")
+            with col7:
+                dropout = st.number_input("Dropout", value=float(defaults["dropout"]), step=0.05, min_value=0.0, max_value=0.9, format="%.2f", key="dl_do_seq")
+            with col8:
+                patience = st.number_input("Early stopping patience", value=int(defaults["patience"]), step=1, key="dl_pat_seq")
+            with col9:
+                bidirectional = st.checkbox("Bidirectional", value=bool(defaults.get("bidirectional", False)), key="dl_bi")
+
+            dl_config = {
+                "hidden_dim": hidden_dim,
+                "num_layers": num_layers,
+                "seq_length": seq_length,
+                "learning_rate": lr,
+                "batch_size": batch_size,
+                "epochs": epochs,
+                "dropout": dropout,
+                "patience": patience,
+                "bidirectional": bidirectional,
+            }
+
+        st.divider()
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            dl_test_size = st.slider("Validation size", 0.1, 0.4, 0.2, 0.05, key="dl_test")
+        with col_b:
+            dl_random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1, key="dl_rs")
+        with col_c:
+            device_info = "🟢 GPU" if torch.cuda.is_available() else "🔵 CPU"
+            st.caption(f"Device: {device_info}")
+
+        st.divider()
+
+        if "dl_action" not in st.session_state:
+            st.session_state.dl_action = None
+        if "dl_prev_model" not in st.session_state:
+            st.session_state.dl_prev_model = None
+        if "dl_hpo_result" not in st.session_state:
+            st.session_state.dl_hpo_result = None
+
+        if st.session_state.dl_prev_model != dl_model_type:
+            st.session_state.dl_action = None
+            st.session_state.dl_prev_model = dl_model_type
+            st.session_state.dl_hpo_result = None
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button(f"🚀 Entrenar {dl_model_type.upper()}", use_container_width=True, type="primary"):
+                st.session_state.dl_action = "train_single"
+                st.rerun()
+        with col_btn2:
+            if st.button(f"🔍 Optimizar hiperparámetros ({dl_model_type.upper()})", use_container_width=True):
+                st.session_state.dl_action = "hpo"
+                st.rerun()
+
+        if st.session_state.dl_action == "hpo":
+            st.markdown(f"### 🔍 Optimización de hiperparámetros — {dl_model_type.upper()}")
+            st.caption("Búsqueda exhaustiva (grid search) sobre combinaciones de hiperparámetros.")
+            hpo_epochs = st.number_input("Epochs por trial", value=50, min_value=10, step=10, key="hpo_ep")
+            hpo_max = st.slider("Máximo de combinaciones a probar", value=30, min_value=5, max_value=200, step=5, key="hpo_n")
+
+            if st.button("▶️ Iniciar búsqueda", type="primary", key="hpo_start"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                trial_info = st.empty()
+
+                def hpo_progress(trial, total, epoch, epoch_total, train_loss, val_loss):
+                    overall = (trial + epoch / epoch_total) / total
+                    progress_bar.progress(overall, text=f"Trial {trial+1}/{total}, Epoch {epoch}/{epoch_total}")
+                    trial_info.caption(f"Trial {trial+1} | Epoch {epoch}/{epoch_total} | Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+
+                try:
+                    hpo_result = optimize_dl_hyperparameters(
+                        df, model_type=dl_model_type, target=dl_target,
+                        base_config=dl_config, n_trials=hpo_max,
+                        epochs_per_trial=hpo_epochs, test_size=float(dl_test_size),
+                        random_state=int(dl_random_state), progress_callback=hpo_progress,
+                    )
+
+                    st.session_state.dl_hpo_result = hpo_result
+
+                    progress_bar.progress(1.0, text="Búsqueda completada!")
+                    status_text.success(f"✅ Mejor val_loss: {hpo_result['best_val_loss']:.6f}")
+
+                    st.divider()
+                    st.markdown("### 📊 Resultados de la búsqueda")
+
+                    hpo_trials_df = []
+                    for t in hpo_result["trials"]:
+                        row = {"Trial": t["trial"], "Val Loss": f"{t['val_loss']:.6f}",
+                               "Train RMSE": f"{t['train_rmse']:.4f}", "Val RMSE": f"{t['val_rmse']:.4f}"}
+                        if t.get("error"):
+                            row["Status"] = f"❌ {t.get('error_msg', 'Error')[:60]}"
+                        else:
+                            row["Status"] = "✅"
+                        hpo_trials_df.append(row)
+                    st.dataframe(pd.DataFrame(hpo_trials_df), use_container_width=True, hide_index=True)
+
+                    st.markdown("### 🏆 Mejor configuración encontrada")
+                    st.json(hpo_result["best_config"])
+
+                    import plotly.graph_objects as go
+                    fig_hpo = go.Figure()
+                    valid_trials = [t for t in hpo_result["trials"] if not t.get("error")]
+                    if valid_trials:
+                        fig_hpo.add_trace(go.Scatter(
+                            x=[t["trial"] for t in valid_trials],
+                            y=[t["val_loss"] for t in valid_trials],
+                            mode="lines+markers",
+                            line=dict(color="#2dd4bf"),
+                            marker=dict(size=8),
+                            name="Val loss",
+                        ))
+                        fig_hpo.add_trace(go.Scatter(
+                            x=[t["trial"] for t in valid_trials],
+                            y=[t["train_rmse"] for t in valid_trials],
+                            mode="lines+markers",
+                            line=dict(color="#5b6af0"),
+                            marker=dict(size=8),
+                            name="Train RMSE",
+                        ))
+                    fig_hpo.update_layout(
+                        title="HPO: Val loss y Train RMSE por trial",
+                        xaxis_title="Trial",
+                        paper_bgcolor="#0d0f14",
+                        plot_bgcolor="#141720",
+                        font={"color": "#e2e8f0"},
+                        height=350,
+                    )
+                    st.plotly_chart(fig_hpo, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"Error en HPO: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+                if st.session_state.dl_hpo_result and st.button("🚀 Entrenar con la mejor configuración", type="primary", key="hpo_use_best"):
+                    hpo_result = st.session_state.dl_hpo_result
+                    final_config = hpo_result["best_config"].copy()
+                    final_config["epochs"] = dl_config.get("epochs", 100)
+                    final_config["patience"] = dl_config.get("patience", 10)
+
+                    progress_bar2 = st.progress(0)
+                    status_text2 = st.empty()
+                    epoch_info2 = st.empty()
+
+                    def final_progress(epoch, total, train_loss, val_loss):
+                        progress_bar2.progress(epoch / total, text=f"Epoch {epoch}/{total}")
+                        epoch_info2.caption(f"Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+
+                    final_result = run_dl_model(
+                        df, model_type=dl_model_type, target=dl_target,
+                        config=final_config, test_size=float(dl_test_size),
+                        random_state=int(dl_random_state), progress_callback=final_progress,
+                    )
+
+                    progress_bar2.progress(1.0, text="Completado!")
+                    status_text2.success(f"✅ {dl_model_type.upper()} entrenado con la mejor configuración.")
+
+                    res_cols = st.columns(4)
+                    res_cols[0].metric("Train rows", f"{final_result['train_rows']:,}")
+                    res_cols[1].metric("Val rows", f"{final_result['val_rows']:,}")
+                    res_cols[2].metric("Train RMSE", f"{final_result['train_rmse']:.4f}")
+                    res_cols[3].metric("Val RMSE", f"{final_result['val_rmse']:.4f}")
+
+                    if "dl_results" not in st.session_state:
+                        st.session_state.dl_results = []
+                    st.session_state.dl_results.append({
+                        "model_type": dl_model_type,
+                        "target": dl_target,
+                        "config": final_config,
+                        "train_rmse": final_result["train_rmse"],
+                        "val_rmse": final_result["val_rmse"],
+                        "history": final_result["history"],
+                        "hpo": True,
+                    })
+
+            st.caption("💡 La búsqueda explora combinaciones aleatorias de hiperparámetros y conserva la mejor según validation loss.")
+
+        elif st.session_state.dl_action == "train_single":
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            epoch_info = st.empty()
+
+            def progress_cb(epoch, total, train_loss, val_loss):
+                progress_bar.progress(epoch / total, text=f"Epoch {epoch}/{total}")
+                epoch_info.caption(f"Train loss: {train_loss:.6f} | Val loss: {val_loss:.6f}")
+
+            try:
+                result = run_dl_model(
+                    df, model_type=dl_model_type, target=dl_target,
+                    config=dl_config, test_size=float(dl_test_size),
+                    random_state=int(dl_random_state), progress_callback=progress_cb,
+                )
+
+                progress_bar.progress(1.0, text="Completado!")
+                status_text.success(f"✅ {dl_model_type.upper()} entrenado exitosamente.")
+
+                st.divider()
+                st.markdown("### 📊 Resultados")
+
+                res_cols = st.columns(4)
+                res_cols[0].metric("Train rows", f"{result['train_rows']:,}")
+                res_cols[1].metric("Val rows", f"{result['val_rows']:,}")
+                res_cols[2].metric("Train RMSE", f"{result['train_rmse']:.4f}")
+                res_cols[3].metric("Val RMSE", f"{result['val_rmse']:.4f}")
+
+                st.markdown("### 📈 Training history")
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    y=result["history"]["train_loss"], name="Train loss",
+                    line=dict(color="#5b6af0"),
+                ))
+                fig.add_trace(go.Scatter(
+                    y=result["history"]["val_loss"], name="Val loss",
+                    line=dict(color="#2dd4bf"),
+                ))
+                fig.update_layout(
+                    title="Loss por epoch",
+                    xaxis_title="Epoch", yaxis_title="Loss",
+                    paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
+                    font={"color": "#e2e8f0"}, height=350,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                if dl_model_type in ("autoencoder", "vae"):
+                    st.markdown("### 🔍 Reconstrucción vs Original")
+                    import plotly.express as px
+                    n_features = min(5, result["train_reconstructed"].shape[1])
+                    for i in range(n_features):
+                        fig2 = go.Figure()
+                        fig2.add_trace(go.Scatter(
+                            y=result["train_reconstructed"][:200, i],
+                            name="Reconstruido", line=dict(color="#2dd4bf"), mode="lines",
+                        ))
+                        fig2.add_trace(go.Scatter(
+                            y=df.iloc[:200][result["feature_cols"][i]].values.astype(float),
+                            name="Original", line=dict(color="#5b6af0", dash="dash"), mode="lines",
+                        ))
+                        fig2.update_layout(
+                            title=f"Feature {i}: {result['feature_cols'][i]}",
+                            paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
+                            font={"color": "#e2e8f0"}, height=280,
+                            margin=dict(t=40, b=10, l=10, r=10),
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
+
+                    st.markdown("### 📐 Embeddings (latent space)")
+                    from sklearn.decomposition import PCA
+                    encoded = result["train_encoded"]
+                    if encoded.shape[1] > 2:
+                        pca = PCA(n_components=2)
+                        encoded_2d = pca.fit_transform(encoded)
+                    else:
+                        encoded_2d = encoded[:, :2]
+                    fig3 = px.scatter(
+                        x=encoded_2d[:, 0], y=encoded_2d[:, 1],
+                        labels={"x": "Component 1", "y": "Component 2"},
+                        title="Latent space (PCA 2D)",
+                        color_discrete_sequence=["#5b6af0"],
+                    )
+                    fig3.update_layout(
+                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
+                        font={"color": "#e2e8f0"}, height=400,
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+
+                else:
+                    st.markdown("### 🔮 Predicciones vs Reales")
+                    import plotly.express as px
+                    fig4 = go.Figure()
+                    fig4.add_trace(go.Scatter(
+                        y=result["val_predictions"][:200],
+                        name="Predicción", line=dict(color="#2dd4bf"), mode="lines",
+                    ))
+                    y_val_actual = df.iloc[-result["val_rows"]:][dl_target].values if dl_target else []
+                    if len(y_val_actual) >= 200:
+                        y_val_actual = y_val_actual[:200]
+                    fig4.add_trace(go.Scatter(
+                        y=y_val_actual, name="Real",
+                        line=dict(color="#5b6af0", dash="dash"), mode="lines",
+                    ))
+                    fig4.update_layout(
+                        title="Predicciones vs Reales (val set)",
+                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
+                        font={"color": "#e2e8f0"}, height=350,
+                    )
+                    st.plotly_chart(fig4, use_container_width=True)
+
+                    fig5 = go.Figure()
+                    fig5.add_trace(go.Scatter(
+                        x=y_val_actual, y=result["val_predictions"][:len(y_val_actual)],
+                        mode="markers", marker=dict(color="#5b6af0", opacity=0.6),
+                    ))
+                    min_v = min(y_val_actual.min(), result["val_predictions"][:len(y_val_actual)].min())
+                    max_v = max(y_val_actual.max(), result["val_predictions"][:len(y_val_actual)].max())
+                    fig5.add_trace(go.Scatter(
+                        x=[min_v, max_v], y=[min_v, max_v],
+                        mode="lines", line=dict(color="#f43f5e", dash="dash"),
+                        name="Perfect prediction",
+                    ))
+                    fig5.update_layout(
+                        title="Predicción vs Real",
+                        xaxis_title="Real", yaxis_title="Predicción",
+                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
+                        font={"color": "#e2e8f0"}, height=400,
+                    )
+                    st.plotly_chart(fig5, use_container_width=True)
+
+                st.divider()
+                st.markdown("### 📋 Configuración usada")
+                st.json(result["config"])
+
+                if "dl_results" not in st.session_state:
+                    st.session_state.dl_results = []
+                st.session_state.dl_results.append({
+                    "model_type": dl_model_type,
+                    "target": dl_target,
+                    "config": dl_config,
+                    "train_rmse": result["train_rmse"],
+                    "val_rmse": result["val_rmse"],
+                    "history": result["history"],
+                    "hpo": False,
+                })
+
+            except Exception as e:
+                st.error(f"Error al entrenar: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+        if st.session_state.get("dl_results"):
+            st.divider()
+            st.markdown("### 📜 Historial de modelos DL")
+            dl_hist = []
+            for i, r in enumerate(st.session_state.dl_results):
+                dl_hist.append({
+                    "#": i + 1,
+                    "Modelo": r["model_type"],
+                    "Target": r["target"] or "(unsupervised)",
+                    "Train RMSE": f"{r['train_rmse']:.4f}",
+                    "Val RMSE": f"{r['val_rmse']:.4f}",
+                    "Epochs": len(r["history"]["train_loss"]),
+                    "HPO": "✅" if r.get("hpo") else "❌",
+                })
+            st.dataframe(pd.DataFrame(dl_hist), use_container_width=True, hide_index=True)

@@ -25,6 +25,7 @@ with st.sidebar:
 
     pages = {
         "📂  Dataset":        "1_dataset",
+        "🛠️  Editor":         "1b_editor",
         "🔍  EDA & Quality":  "2_eda",
         "🏋️  Train Models":   "3_train",
         "📊  Compare":        "4_compare",
@@ -47,7 +48,7 @@ with st.sidebar:
     st.markdown('<div class="section-header">Pipeline Status</div>', unsafe_allow_html=True)
     checks = {
         "Dataset loaded":   st.session_state.df is not None,
-        "Targets selected": st.session_state.target_cols is not None,
+        "Targets configured": st.session_state.get("target_cols") is not None,
         "Models trained":   st.session_state.automl_run is not None,
     }
     for label, done in checks.items():
@@ -58,14 +59,16 @@ with st.sidebar:
 page = st.session_state.page
 
 if page == "1_dataset":
-    exec(open("pages/1_dataset.py").read())
+    exec(open("pages/1_dataset.py", encoding="utf-8").read())
+elif page == "1b_editor":
+    exec(open("pages/1b_editor.py", encoding="utf-8").read())
 elif page == "2_eda":
-    exec(open("pages/2_eda.py").read())
+    exec(open("pages/2_eda.py", encoding="utf-8").read())
 elif page == "3_train":
-    exec(open("pages/3_train.py").read())
+    exec(open("pages/3_train.py", encoding="utf-8").read())
 elif page == "4_compare":
-    exec(open("pages/4_compare.py").read())
+    exec(open("pages/4_compare.py", encoding="utf-8").read())
 elif page == "5_evaluate":
-    exec(open("pages/5_evaluate.py").read())
+    exec(open("pages/5_evaluate.py", encoding="utf-8").read())
 elif page == "6_explain":
-    exec(open("pages/6_explain.py").read())
+    exec(open("pages/6_explain.py", encoding="utf-8").read())

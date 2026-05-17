@@ -27,24 +27,23 @@ with tab1:
     st.markdown("### Tipos de columnas")
     type_map = {}
     for c in df.columns:
-        if df[c].dtype == object or str(df[c].dtype) == "category":
-            type_map[c] = "categorical"
-        elif df[c].nunique() <= 15 and df[c].dtype in [np.int64, np.int32, int]:
-            type_map[c] = "discrete"
+        if pd.api.types.is_numeric_dtype(df[c]):
+            type_map[c] = "continuous" if df[c].nunique() > 15 else "discrete"
         else:
-            type_map[c] = "continuous"
+            type_map[c] = "categorical"
 
     rows = []
     for c in df.columns:
+        is_numeric = pd.api.types.is_numeric_dtype(df[c])
         rows.append({
             "Columna": c,
             "Tipo dtype": str(df[c].dtype),
             "Clase": type_map[c],
             "# Únicos": df[c].nunique(),
             "% Nulos": f"{df[c].isnull().mean()*100:.1f}%",
-            "Min": df[c].min() if type_map[c] != "categorical" else "-",
-            "Max": df[c].max() if type_map[c] != "categorical" else "-",
-            "Media": f"{df[c].mean():.2f}" if type_map[c] != "categorical" else "-",
+            "Min": df[c].min() if is_numeric else "-",
+            "Max": df[c].max() if is_numeric else "-",
+            "Media": f"{df[c].mean():.2f}" if is_numeric else "-",
             "Target": "🎯" if c in targets else "",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)

@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from io import StringIO
-from ml_pipeline.tasks import infer_target_task, normalize_target_config, task_label
 
 st.markdown("# 📂 Dataset")
 st.markdown('<div class="section-header">Load & Configure</div>', unsafe_allow_html=True)
@@ -20,12 +18,10 @@ def load_sample(name):
     from sklearn.datasets import load_iris, load_wine, fetch_california_housing
     if name == "iris":
         d = load_iris(as_frame=True)
-        df = d.frame
-        return df
+        return d.frame
     elif name == "wine":
         d = load_wine(as_frame=True)
-        df = d.frame
-        return df
+        return d.frame
     elif name == "housing_multi":
         rng = np.random.default_rng(42)
         n = 500
@@ -93,7 +89,7 @@ with col2:
         st.session_state.df = load_sample(key)
         st.success("✅ Dataset de ejemplo cargado")
 
-# ── Preview & config ───────────────────────────────────────────────────────────
+# ── Preview ────────────────────────────────────────────────────────────────────
 if st.session_state.df is not None:
     df = st.session_state.df
     st.divider()
@@ -114,64 +110,4 @@ if st.session_state.df is not None:
     st.dataframe(df.head(20), use_container_width=True)
 
     st.divider()
-    st.markdown("### ⚙️ Configurar Targets")
-
-    targets = st.multiselect(
-        "Variables objetivo (target/s)",
-        options=df.columns.tolist(),
-        default=st.session_state.target_cols or [],
-        help="Cada target se entrenará con un AutoML independiente.",
-    )
-
-    if targets:
-        is_multi = len(targets) > 1
-        badge = '<span class="tag teal">MULTI-TARGET</span>' if is_multi else '<span class="tag">SINGLE TARGET</span>'
-        st.markdown(f"**Modo:** {badge} &nbsp; **Backend:** `mljar-supervised`", unsafe_allow_html=True)
-
-        st.markdown("#### Tarea por target")
-        task_options = ["binary_classification", "multiclass_classification", "regression"]
-        target_configs = {}
-        blocking_targets = []
-
-        for target in targets:
-            inferred = infer_target_task(df[target])
-            if inferred["ml_task"] == "invalid":
-                blocking_targets.append(target)
-                st.error(f"`{target}` no es entrenable: {inferred['reason']}")
-                target_configs[target] = inferred
-                continue
-
-            default_idx = task_options.index(inferred["ml_task"])
-            selected_ml_task = st.selectbox(
-                f"`{target}`",
-                task_options,
-                index=default_idx,
-                format_func=task_label,
-                key=f"target_task_{target}",
-                help=inferred["reason"],
-            )
-
-            config = normalize_target_config({**inferred, "ml_task": selected_ml_task})
-            if selected_ml_task != inferred["ml_task"]:
-                config["reason"] = f"Override manual. Inferencia original: {task_label(inferred['ml_task'])}."
-            target_configs[target] = config
-
-            metric_text = "maximizar" if config["direction"] == "max" else "minimizar"
-            st.caption(
-                f"Inferido: {task_label(inferred['ml_task'])}. "
-                f"Métrica primaria: `{config['primary_metric']}` ({metric_text}). "
-                f"{config['reason']}"
-            )
-
-        if st.button("✅ Confirmar configuración", disabled=bool(blocking_targets)):
-            st.session_state.target_cols = targets
-            st.session_state.target_configs = target_configs
-            st.session_state.task_type   = "per_target"
-            st.session_state.multioutput = is_multi
-            # Reset downstream state
-            st.session_state.trained_models = None
-            st.session_state.best_model     = None
-            st.session_state.compare_df     = None
-            st.session_state.automl_run     = None
-            st.session_state.setup_done     = None
-            st.success(f"Configurado: {len(targets)} target(s) con AutoML independiente por target.")
+    st.info("⚙️ Configura los targets y entrena modelos en la sección **🏋️ Entrenar Modelos**.")
