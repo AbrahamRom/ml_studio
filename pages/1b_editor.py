@@ -27,8 +27,9 @@ with c3:
     st.markdown(f'<div class="metric-card"><div class="val">{edits}</div><div class="label">Ediciones</div></div>', unsafe_allow_html=True)
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_delete, tab_edit, tab_create, tab_derived = st.tabs([
+tab_delete, tab_nulls, tab_edit, tab_create, tab_derived = st.tabs([
     "🗑️  Eliminar columnas",
+    "🧹  Limpiar nulos",
     "✏️  Editar columnas",
     "➕  Crear columna vacía",
     "🔗  Derivar columna",
@@ -63,7 +64,170 @@ with tab_delete:
             st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2: Edit columns (rename, type convert)
+# TAB 2: Clean nulls (dropna / fillna)
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_nulls:
+    st.markdown("### Manejo de valores nulos")
+
+    null_summary = df.isnull().sum()
+    cols_with_nulls = null_summary[null_summary > 0]
+
+    if cols_with_nulls.empty:
+        st.success("✅ No hay valores nulos en el dataset.")
+    else:
+        st.markdown(f"**{len(cols_with_nulls)} columna(s) con valores nulos:**")
+        null_df = pd.DataFrame({
+            "Columna": cols_with_nulls.index,
+            "Nulos": cols_with_nulls.values,
+            "%": (cols_with_nulls.values / len(df) * 100).round(2),
+        })
+        st.dataframe(null_df, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.markdown("#### Opciones de limpieza")
+
+        clean_mode = st.radio(
+            "Método",
+            ["Eliminar filas", "Eliminar columnas", "Rellenar valores"],
+            horizontal=True,
+            key="null_clean_mode",
+        )
+
+        if clean_mode == "Eliminar filas":
+            scope = st.radio(
+                "Alcance",
+                ["Todo el dataset", "Solo columnas seleccionadas"],
+                horizontal=True,
+                key="dropna_scope",
+            )
+
+            selected_cols_drop = []
+            if scope == "Solo columnas seleccionadas":
+                selected_cols_drop = st.multiselect(
+                    "Columnas a considerar",
+                    options=cols_with_nulls.index.tolist(),
+                    default=cols_with_nulls.index.tolist(),
+                )
+
+            how = st.radio("Criterio", ["any (al menos un nulo)", "all (todos nulos)"], horizontal=True, key="dropna_how")
+            how_val = "any" if how == "any (al menos un nulo)" else "all"
+
+            preview_rows = df.dropna(subset=selected_cols_drop if selected_cols_drop else None, how=how_val)
+            rows_to_drop = len(df) - len(preview_rows)
+
+            if rows_to_drop > 0:
+                st.warning(f"Se eliminarán **{rows_to_drop:,} fila(s)**. Quedarán **{len(preview_rows):,} fila(s)**.")
+            else:
+                st.info("No se eliminaría ninguna fila con esta configuración.")
+
+            if st.button("🧹  Eliminar filas con nulos", type="primary", key="dropna_btn"):
+                if rows_to_drop > 0:
+                    st.session_state.df = preview_rows.reset_index(drop=True)
+                    st.session_state.edit_history.append({
+                        "action": "dropna_rows",
+                        "how": how_val,
+                        "columns": selected_cols_drop if selected_cols_drop else "all",
+                        "rows_dropped": rows_to_drop,
+                    })
+                    st.success(f"✅ {rows_to_drop:,} fila(s) eliminada(s).")
+                    st.rerun()
+
+        elif clean_mode == "Eliminar columnas":
+            threshold_pct = st.slider(
+                "Umbral: eliminar columnas con más de X% de nulos",
+                min_value=0, max_value=100, value=50, step=5,
+                key="dropcol_threshold",
+            )
+
+            cols_to_drop = null_summary[null_summary / len(df) * 100 > threshold_pct]
+            if len(cols_to_drop) > 0:
+                st.warning(f"Se eliminarán **{len(cols_to_drop)} columna(s):**")
+                for col_name, count in cols_to_drop.items():
+                    pct = count / len(df) * 100
+                    st.caption(f"`{col_name}` — {count} nulos ({pct:.1f}%)")
+            else:
+                st.info("No hay columnas que superen el umbral.")
+
+            if st.button("🧹  Eliminar columnas con nulos", type="primary", key="dropcol_btn"):
+                if len(cols_to_drop) > 0:
+                    st.session_state.df = df.drop(columns=cols_to_drop.index)
+                    st.session_state.edit_history.append({
+                        "action": "dropna_cols",
+                        "threshold_pct": threshold_pct,
+                        "columns_dropped": cols_to_drop.index.tolist(),
+                    })
+                    st.success(f"✅ {len(cols_to_drop)} columna(s) eliminada(s).")
+                    st.rerun()
+
+        else:
+            fill_scope = st.radio(
+                "Alcance",
+                ["Todo el dataset", "Solo columnas seleccionadas"],
+                horizontal=True,
+                key="fillna_scope",
+            )
+
+            selected_cols_fill = []
+            if fill_scope == "Solo columnas seleccionadas":
+                selected_cols_fill = st.multiselect(
+                    "Columnas a rellenar",
+                    options=cols_with_nulls.index.tolist(),
+                    default=cols_with_nulls.index.tolist(),
+                )
+
+            fill_method = st.radio(
+                "Método de relleno",
+                ["Valor fijo", "Media", "Mediana", "Moda", "Forward fill", "Backward fill"],
+                horizontal=True,
+                key="fillna_method",
+            )
+
+            fill_value = None
+            if fill_method == "Valor fijo":
+                fill_type = st.radio("Tipo", ["Número", "Texto"], horizontal=True, key="fillna_val_type")
+                if fill_type == "Número":
+                    fill_value = st.number_input("Valor", value=0.0, key="fillna_num_val")
+                else:
+                    fill_value = st.text_input("Valor", value="", key="fillna_str_val")
+
+            if st.button("🧹  Rellenar nulos", type="primary", key="fillna_btn"):
+                try:
+                    filled = df.copy()
+                    target_cols = selected_cols_fill if selected_cols_fill else filled.columns.tolist()
+
+                    for col in target_cols:
+                        if fill_method == "Valor fijo":
+                            filled[col] = filled[col].fillna(fill_value)
+                        elif fill_method == "Media":
+                            if pd.api.types.is_numeric_dtype(filled[col]):
+                                filled[col] = filled[col].fillna(filled[col].mean())
+                        elif fill_method == "Mediana":
+                            if pd.api.types.is_numeric_dtype(filled[col]):
+                                filled[col] = filled[col].fillna(filled[col].median())
+                        elif fill_method == "Moda":
+                            mode_val = filled[col].mode()
+                            if not mode_val.empty:
+                                filled[col] = filled[col].fillna(mode_val.iloc[0])
+                        elif fill_method == "Forward fill":
+                            filled[col] = filled[col].fillna(method="ffill")
+                        elif fill_method == "Backward fill":
+                            filled[col] = filled[col].fillna(method="bfill")
+
+                    n_filled = sum(df[col].isnull().sum() - filled[col].isnull().sum() for col in target_cols)
+                    st.session_state.df = filled
+                    st.session_state.edit_history.append({
+                        "action": "fillna",
+                        "method": fill_method,
+                        "columns": target_cols if selected_cols_fill else "all",
+                        "values_filled": int(n_filled),
+                    })
+                    st.success(f"✅ {int(n_filled)} valor(es) nulo(s) rellenado(s).")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al rellenar: {e}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 3: Edit columns (rename, type convert)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_edit:
     st.markdown("### Renombrar o cambiar tipo de columna")
@@ -153,7 +317,7 @@ with tab_edit:
                     st.error(f"No se pudo convertir: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3: Create empty column
+# TAB 4: Create empty column
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_create:
     st.markdown("### Crear una nueva columna desde cero")
@@ -200,7 +364,7 @@ with tab_create:
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4: Derive column from existing ones
+# TAB 5: Derive column from existing ones
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_derived:
     st.markdown("### Crear columna a partir de otras")
@@ -522,6 +686,12 @@ with st.expander("📋 Historial de ediciones"):
             action = edit.get("action", "")
             if action == "delete":
                 label = f"🗑️  Eliminar columnas: {', '.join(edit.get('columns', []))}"
+            elif action == "dropna_rows":
+                label = f"🧹  Eliminar {edit.get('rows_dropped', 0):,} fila(s) con nulos (how={edit.get('how', 'any')})"
+            elif action == "dropna_cols":
+                label = f"🧹  Eliminar {len(edit.get('columns_dropped', []))} columna(s) con >{edit.get('threshold_pct', 0)}% nulos"
+            elif action == "fillna":
+                label = f"🧹  Rellenar {edit.get('values_filled', 0):,} nulo(s) con {edit.get('method', '?')}"
             elif action == "rename":
                 label = f"✏️  Renombrar `{edit.get('old', '?')}` → `{edit.get('new', '?')}`"
             elif action == "type_convert":
@@ -547,8 +717,45 @@ with st.expander("📋 Historial de ediciones"):
     if st.session_state.edit_history and st.button("🔄  Restaurar dataset original", type="secondary"):
         st.warning("Esto descartará TODAS las ediciones. ¿Continuar?")
         if st.button("Sí, restaurar original", type="primary"):
-            # We can't restore original without storing it, so just inform
             st.info("Para restaurar, recarga el dataset en la página **Dataset**.")
+
+# ── Save edited dataset ────────────────────────────────────────────────────────
+st.divider()
+st.markdown("### 💾 Guardar dataset editado")
+
+save_filename = st.text_input("Nombre del archivo", value="dataset_editado.csv", key="save_filename")
+save_format = st.radio("Formato", ["CSV", "CSV con punto y coma", "Excel"], horizontal=True, key="save_format")
+
+if st.button("💾  Guardar archivo", type="primary", key="save_dataset_btn"):
+    try:
+        import os
+        from pathlib import Path
+
+        if not save_filename.endswith((".csv", ".xlsx")):
+            save_filename += ".csv" if save_format != "Excel" else ".xlsx"
+
+        save_dir = Path(".")
+        save_path = save_dir / save_filename
+
+        if save_format == "CSV":
+            st.session_state.df.to_csv(save_path, index=False, encoding="utf-8")
+        elif save_format == "CSV con punto y coma":
+            st.session_state.df.to_csv(save_path, index=False, encoding="utf-8", sep=";")
+        elif save_format == "Excel":
+            st.session_state.df.to_excel(save_path, index=False)
+
+        st.success(f"✅ Dataset guardado en `{save_path}`")
+
+        with open(save_path, "rb") as f:
+            st.download_button(
+                label="⬇️  Descargar archivo",
+                data=f,
+                file_name=save_filename,
+                mime="application/octet-stream",
+                key="download_edited_dataset",
+            )
+    except Exception as e:
+        st.error(f"Error al guardar: {e}")
 
 # ── Current dataset preview ────────────────────────────────────────────────────
 st.divider()
