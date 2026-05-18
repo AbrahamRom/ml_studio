@@ -737,6 +737,9 @@ if st.button("💾  Guardar archivo", type="primary", key="save_dataset_btn"):
         save_dir = Path(".")
         save_path = save_dir / save_filename
 
+        total_rows = len(st.session_state.df)
+        total_cols = len(st.session_state.df.columns)
+
         if save_format == "CSV":
             st.session_state.df.to_csv(save_path, index=False, encoding="utf-8")
         elif save_format == "CSV con punto y coma":
@@ -744,7 +747,7 @@ if st.button("💾  Guardar archivo", type="primary", key="save_dataset_btn"):
         elif save_format == "Excel":
             st.session_state.df.to_excel(save_path, index=False)
 
-        st.success(f"✅ Dataset guardado en `{save_path}`")
+        st.success(f"✅ Dataset guardado: `{save_path}` ({total_rows:,} filas × {total_cols} columnas)")
 
         with open(save_path, "rb") as f:
             st.download_button(
@@ -759,5 +762,6 @@ if st.button("💾  Guardar archivo", type="primary", key="save_dataset_btn"):
 
 # ── Current dataset preview ────────────────────────────────────────────────────
 st.divider()
-st.markdown("### Dataset actual")
+st.markdown(f"### Dataset actual ({len(st.session_state.df):,} filas, {len(st.session_state.df.columns)} columnas)")
+st.caption("Mostrando primeras 20 filas. El dataset completo se conserva en memoria.")
 st.dataframe(st.session_state.df.head(20), use_container_width=True)

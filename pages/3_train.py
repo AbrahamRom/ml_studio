@@ -347,6 +347,47 @@ with tab_dl:
 
         defaults = DL_DEFAULT_CONFIGS[dl_model_type]
 
+        # Apply HPO best config to widget session state BEFORE widgets are rendered
+        hpo_applied = st.session_state.get("dl_hpo_apply")
+        if hpo_applied and hpo_applied.get("model_type") == dl_model_type:
+            best = hpo_applied.get("config", {})
+            if dl_model_type in ("autoencoder", "vae"):
+                if "encoding_dims" in best:
+                    st.session_state.dl_enc_dims = best["encoding_dims"] if isinstance(best["encoding_dims"], str) else ",".join(map(str, best["encoding_dims"]))
+                if "learning_rate" in best:
+                    st.session_state.dl_lr_ae = float(best["learning_rate"])
+                if "batch_size" in best:
+                    st.session_state.dl_bs_ae = int(best["batch_size"])
+                if "epochs" in best:
+                    st.session_state.dl_ep_ae = int(best["epochs"])
+                if "dropout" in best:
+                    st.session_state.dl_do_ae = float(best["dropout"])
+                if "patience" in best:
+                    st.session_state.dl_pat_ae = int(best["patience"])
+                if "kl_weight" in best:
+                    st.session_state.dl_kl = float(best["kl_weight"])
+            else:
+                if "hidden_dim" in best:
+                    st.session_state.dl_hd = int(best["hidden_dim"])
+                if "num_layers" in best:
+                    st.session_state.dl_nl = int(best["num_layers"])
+                if "seq_length" in best:
+                    st.session_state.dl_sl = int(best["seq_length"])
+                if "learning_rate" in best:
+                    st.session_state.dl_lr_seq = float(best["learning_rate"])
+                if "batch_size" in best:
+                    st.session_state.dl_bs_seq = int(best["batch_size"])
+                if "epochs" in best:
+                    st.session_state.dl_ep_seq = int(best["epochs"])
+                if "dropout" in best:
+                    st.session_state.dl_do_seq = float(best["dropout"])
+                if "patience" in best:
+                    st.session_state.dl_pat_seq = int(best["patience"])
+                if "bidirectional" in best:
+                    st.session_state.dl_bi = bool(best["bidirectional"])
+            # Clear after applying so it doesn't interfere with future runs
+            del st.session_state.dl_hpo_apply
+
         if dl_model_type in ("autoencoder", "vae"):
             col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
@@ -431,25 +472,68 @@ with tab_dl:
 
         st.divider()
 
-        if "dl_action" not in st.session_state:
-            st.session_state.dl_action = None
-        if "dl_prev_model" not in st.session_state:
-            st.session_state.dl_prev_model = None
         if "dl_hpo_result" not in st.session_state:
             st.session_state.dl_hpo_result = None
+        if "dl_results" not in st.session_state:
+            st.session_state.dl_results = []
+        if "dl_hpo_apply" not in st.session_state:
+            st.session_state.dl_hpo_apply = None
+        if "dl_prev_model" not in st.session_state:
+            st.session_state.dl_prev_model = None
+        if "dl_action" not in st.session_state:
+            st.session_state.dl_action = None
 
         if st.session_state.dl_prev_model != dl_model_type:
-            st.session_state.dl_action = None
             st.session_state.dl_prev_model = dl_model_type
             st.session_state.dl_hpo_result = None
+            st.session_state.dl_hpo_apply = None
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button(f"🚀 Entrenar {dl_model_type.upper()}", use_container_width=True, type="primary"):
-                st.session_state.dl_action = "train_single"
-                st.rerun()
+            if st.button(f"🚀 Entrenar {dl_model_type.upper()}", use_container_width=True, type="primary", key="dl_train_btn"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                epoch_info = st.empty()
+
+                def progress_cb(epoch, total, train_loss, val_loss):
+                    progress_bar.progress(epoch / total, text=f"Epoch {epoch}/{total}")
+                    epoch_info.caption(f"Train loss: {train_loss:.6f} | Val loss: {val_loss:.6f}")
+
+                try:
+                    result = run_dl_model(
+                        df, model_type=dl_model_type, target=dl_target,
+                        config=dl_config, test_size=float(dl_test_size),
+                        random_state=int(dl_random_state), progress_callback=progress_cb,
+                    )
+
+                    progress_bar.progress(1.0, text="Completado!")
+                    status_text.success(f"✅ {dl_model_type.upper()} entrenado exitosamente.")
+
+                    st.session_state.dl_results.append({
+                        "model_type": dl_model_type,
+                        "target": dl_target,
+                        "config": dl_config,
+                        "train_rmse": result["train_rmse"],
+                        "val_rmse": result["val_rmse"],
+                        "history": result["history"],
+                        "hpo": False,
+                        "model": result.get("model"),
+                        "scaler": result.get("scaler"),
+                        "feature_cols": result.get("feature_cols", []),
+                        "train_reconstructed": result.get("train_reconstructed"),
+                        "val_reconstructed": result.get("val_reconstructed"),
+                        "train_encoded": result.get("train_encoded"),
+                        "val_predictions": result.get("val_predictions"),
+                        "reconstruction_error": result.get("reconstruction_error"),
+                    })
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al entrenar: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
         with col_btn2:
-            if st.button(f"🔍 Optimizar hiperparámetros ({dl_model_type.upper()})", use_container_width=True):
+            if st.button(f"🔍 Optimizar hiperparámetros ({dl_model_type.upper()})", use_container_width=True, key="dl_hpo_btn"):
                 st.session_state.dl_action = "hpo"
                 st.rerun()
 
@@ -481,253 +565,72 @@ with tab_dl:
 
                     progress_bar.progress(1.0, text="Búsqueda completada!")
                     status_text.success(f"✅ Mejor val_loss: {hpo_result['best_val_loss']:.6f}")
-
-                    st.divider()
-                    st.markdown("### 📊 Resultados de la búsqueda")
-
-                    hpo_trials_df = []
-                    for t in hpo_result["trials"]:
-                        row = {"Trial": t["trial"], "Val Loss": f"{t['val_loss']:.6f}",
-                               "Train RMSE": f"{t['train_rmse']:.4f}", "Val RMSE": f"{t['val_rmse']:.4f}"}
-                        if t.get("error"):
-                            row["Status"] = f"❌ {t.get('error_msg', 'Error')[:60]}"
-                        else:
-                            row["Status"] = "✅"
-                        hpo_trials_df.append(row)
-                    st.dataframe(pd.DataFrame(hpo_trials_df), use_container_width=True, hide_index=True)
-
-                    st.markdown("### 🏆 Mejor configuración encontrada")
-                    st.json(hpo_result["best_config"])
-
-                    import plotly.graph_objects as go
-                    fig_hpo = go.Figure()
-                    valid_trials = [t for t in hpo_result["trials"] if not t.get("error")]
-                    if valid_trials:
-                        fig_hpo.add_trace(go.Scatter(
-                            x=[t["trial"] for t in valid_trials],
-                            y=[t["val_loss"] for t in valid_trials],
-                            mode="lines+markers",
-                            line=dict(color="#2dd4bf"),
-                            marker=dict(size=8),
-                            name="Val loss",
-                        ))
-                        fig_hpo.add_trace(go.Scatter(
-                            x=[t["trial"] for t in valid_trials],
-                            y=[t["train_rmse"] for t in valid_trials],
-                            mode="lines+markers",
-                            line=dict(color="#5b6af0"),
-                            marker=dict(size=8),
-                            name="Train RMSE",
-                        ))
-                    fig_hpo.update_layout(
-                        title="HPO: Val loss y Train RMSE por trial",
-                        xaxis_title="Trial",
-                        paper_bgcolor="#0d0f14",
-                        plot_bgcolor="#141720",
-                        font={"color": "#e2e8f0"},
-                        height=350,
-                    )
-                    st.plotly_chart(fig_hpo, use_container_width=True)
-
                 except Exception as e:
                     st.error(f"Error en HPO: {e}")
                     import traceback
                     st.code(traceback.format_exc())
 
-                if st.session_state.dl_hpo_result and st.button("🚀 Entrenar con la mejor configuración", type="primary", key="hpo_use_best"):
-                    hpo_result = st.session_state.dl_hpo_result
-                    final_config = hpo_result["best_config"].copy()
-                    final_config["epochs"] = dl_config.get("epochs", 100)
-                    final_config["patience"] = dl_config.get("patience", 10)
+        if st.session_state.dl_hpo_result:
+            hpo_result = st.session_state.dl_hpo_result
 
-                    progress_bar2 = st.progress(0)
-                    status_text2 = st.empty()
-                    epoch_info2 = st.empty()
+            st.divider()
+            st.markdown("### 📊 Resultados de la búsqueda")
 
-                    def final_progress(epoch, total, train_loss, val_loss):
-                        progress_bar2.progress(epoch / total, text=f"Epoch {epoch}/{total}")
-                        epoch_info2.caption(f"Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+            hpo_trials_df = []
+            for t in hpo_result["trials"]:
+                row = {"Trial": t["trial"], "Val Loss": f"{t['val_loss']:.6f}",
+                       "Train RMSE": f"{t['train_rmse']:.4f}", "Val RMSE": f"{t['val_rmse']:.4f}"}
+                if t.get("error"):
+                    row["Status"] = f"❌ {t.get('error_msg', 'Error')[:60]}"
+                else:
+                    row["Status"] = "✅"
+                hpo_trials_df.append(row)
+            st.dataframe(pd.DataFrame(hpo_trials_df), use_container_width=True, hide_index=True)
 
-                    final_result = run_dl_model(
-                        df, model_type=dl_model_type, target=dl_target,
-                        config=final_config, test_size=float(dl_test_size),
-                        random_state=int(dl_random_state), progress_callback=final_progress,
-                    )
+            st.markdown("### 🏆 Mejor configuración encontrada")
+            st.json(hpo_result["best_config"])
 
-                    progress_bar2.progress(1.0, text="Completado!")
-                    status_text2.success(f"✅ {dl_model_type.upper()} entrenado con la mejor configuración.")
+            import plotly.graph_objects as go
+            fig_hpo = go.Figure()
+            valid_trials = [t for t in hpo_result["trials"] if not t.get("error")]
+            if valid_trials:
+                fig_hpo.add_trace(go.Scatter(
+                    x=[t["trial"] for t in valid_trials],
+                    y=[t["val_loss"] for t in valid_trials],
+                    mode="lines+markers",
+                    line=dict(color="#2dd4bf"),
+                    marker=dict(size=8),
+                    name="Val loss",
+                ))
+                fig_hpo.add_trace(go.Scatter(
+                    x=[t["trial"] for t in valid_trials],
+                    y=[t["train_rmse"] for t in valid_trials],
+                    mode="lines+markers",
+                    line=dict(color="#5b6af0"),
+                    marker=dict(size=8),
+                    name="Train RMSE",
+                ))
+            fig_hpo.update_layout(
+                title="HPO: Val loss y Train RMSE por trial",
+                xaxis_title="Trial",
+                paper_bgcolor="#0d0f14",
+                plot_bgcolor="#141720",
+                font={"color": "#e2e8f0"},
+                height=350,
+            )
+            st.plotly_chart(fig_hpo, use_container_width=True)
 
-                    res_cols = st.columns(4)
-                    res_cols[0].metric("Train rows", f"{final_result['train_rows']:,}")
-                    res_cols[1].metric("Val rows", f"{final_result['val_rows']:,}")
-                    res_cols[2].metric("Train RMSE", f"{final_result['train_rmse']:.4f}")
-                    res_cols[3].metric("Val RMSE", f"{final_result['val_rmse']:.4f}")
+            if st.button("🚀 Entrenar con la mejor configuración", type="primary", key="hpo_use_best"):
+                best = hpo_result["best_config"].copy()
 
-                    if "dl_results" not in st.session_state:
-                        st.session_state.dl_results = []
-                    st.session_state.dl_results.append({
-                        "model_type": dl_model_type,
-                        "target": dl_target,
-                        "config": final_config,
-                        "train_rmse": final_result["train_rmse"],
-                        "val_rmse": final_result["val_rmse"],
-                        "history": final_result["history"],
-                        "hpo": True,
-                    })
+                st.session_state.dl_hpo_apply = {
+                    "model_type": dl_model_type,
+                    "config": best,
+                }
+                st.success("✅ Hiperparámetros rellenados con la mejor configuración. Presiona **Entrenar** para iniciar.")
+                st.rerun()
 
             st.caption("💡 La búsqueda explora combinaciones aleatorias de hiperparámetros y conserva la mejor según validation loss.")
-
-        elif st.session_state.dl_action == "train_single":
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            epoch_info = st.empty()
-
-            def progress_cb(epoch, total, train_loss, val_loss):
-                progress_bar.progress(epoch / total, text=f"Epoch {epoch}/{total}")
-                epoch_info.caption(f"Train loss: {train_loss:.6f} | Val loss: {val_loss:.6f}")
-
-            try:
-                result = run_dl_model(
-                    df, model_type=dl_model_type, target=dl_target,
-                    config=dl_config, test_size=float(dl_test_size),
-                    random_state=int(dl_random_state), progress_callback=progress_cb,
-                )
-
-                progress_bar.progress(1.0, text="Completado!")
-                status_text.success(f"✅ {dl_model_type.upper()} entrenado exitosamente.")
-
-                st.divider()
-                st.markdown("### 📊 Resultados")
-
-                res_cols = st.columns(4)
-                res_cols[0].metric("Train rows", f"{result['train_rows']:,}")
-                res_cols[1].metric("Val rows", f"{result['val_rows']:,}")
-                res_cols[2].metric("Train RMSE", f"{result['train_rmse']:.4f}")
-                res_cols[3].metric("Val RMSE", f"{result['val_rmse']:.4f}")
-
-                st.markdown("### 📈 Training history")
-                import plotly.graph_objects as go
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    y=result["history"]["train_loss"], name="Train loss",
-                    line=dict(color="#5b6af0"),
-                ))
-                fig.add_trace(go.Scatter(
-                    y=result["history"]["val_loss"], name="Val loss",
-                    line=dict(color="#2dd4bf"),
-                ))
-                fig.update_layout(
-                    title="Loss por epoch",
-                    xaxis_title="Epoch", yaxis_title="Loss",
-                    paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-                    font={"color": "#e2e8f0"}, height=350,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-                if dl_model_type in ("autoencoder", "vae"):
-                    st.markdown("### 🔍 Reconstrucción vs Original")
-                    import plotly.express as px
-                    n_features = min(5, result["train_reconstructed"].shape[1])
-                    for i in range(n_features):
-                        fig2 = go.Figure()
-                        fig2.add_trace(go.Scatter(
-                            y=result["train_reconstructed"][:200, i],
-                            name="Reconstruido", line=dict(color="#2dd4bf"), mode="lines",
-                        ))
-                        fig2.add_trace(go.Scatter(
-                            y=df.iloc[:200][result["feature_cols"][i]].values.astype(float),
-                            name="Original", line=dict(color="#5b6af0", dash="dash"), mode="lines",
-                        ))
-                        fig2.update_layout(
-                            title=f"Feature {i}: {result['feature_cols'][i]}",
-                            paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-                            font={"color": "#e2e8f0"}, height=280,
-                            margin=dict(t=40, b=10, l=10, r=10),
-                        )
-                        st.plotly_chart(fig2, use_container_width=True)
-
-                    st.markdown("### 📐 Embeddings (latent space)")
-                    from sklearn.decomposition import PCA
-                    encoded = result["train_encoded"]
-                    if encoded.shape[1] > 2:
-                        pca = PCA(n_components=2)
-                        encoded_2d = pca.fit_transform(encoded)
-                    else:
-                        encoded_2d = encoded[:, :2]
-                    fig3 = px.scatter(
-                        x=encoded_2d[:, 0], y=encoded_2d[:, 1],
-                        labels={"x": "Component 1", "y": "Component 2"},
-                        title="Latent space (PCA 2D)",
-                        color_discrete_sequence=["#5b6af0"],
-                    )
-                    fig3.update_layout(
-                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-                        font={"color": "#e2e8f0"}, height=400,
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-
-                else:
-                    st.markdown("### 🔮 Predicciones vs Reales")
-                    import plotly.express as px
-                    fig4 = go.Figure()
-                    fig4.add_trace(go.Scatter(
-                        y=result["val_predictions"][:200],
-                        name="Predicción", line=dict(color="#2dd4bf"), mode="lines",
-                    ))
-                    y_val_actual = df.iloc[-result["val_rows"]:][dl_target].values if dl_target else []
-                    if len(y_val_actual) >= 200:
-                        y_val_actual = y_val_actual[:200]
-                    fig4.add_trace(go.Scatter(
-                        y=y_val_actual, name="Real",
-                        line=dict(color="#5b6af0", dash="dash"), mode="lines",
-                    ))
-                    fig4.update_layout(
-                        title="Predicciones vs Reales (val set)",
-                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-                        font={"color": "#e2e8f0"}, height=350,
-                    )
-                    st.plotly_chart(fig4, use_container_width=True)
-
-                    fig5 = go.Figure()
-                    fig5.add_trace(go.Scatter(
-                        x=y_val_actual, y=result["val_predictions"][:len(y_val_actual)],
-                        mode="markers", marker=dict(color="#5b6af0", opacity=0.6),
-                    ))
-                    min_v = min(y_val_actual.min(), result["val_predictions"][:len(y_val_actual)].min())
-                    max_v = max(y_val_actual.max(), result["val_predictions"][:len(y_val_actual)].max())
-                    fig5.add_trace(go.Scatter(
-                        x=[min_v, max_v], y=[min_v, max_v],
-                        mode="lines", line=dict(color="#f43f5e", dash="dash"),
-                        name="Perfect prediction",
-                    ))
-                    fig5.update_layout(
-                        title="Predicción vs Real",
-                        xaxis_title="Real", yaxis_title="Predicción",
-                        paper_bgcolor="#0d0f14", plot_bgcolor="#141720",
-                        font={"color": "#e2e8f0"}, height=400,
-                    )
-                    st.plotly_chart(fig5, use_container_width=True)
-
-                st.divider()
-                st.markdown("### 📋 Configuración usada")
-                st.json(result["config"])
-
-                if "dl_results" not in st.session_state:
-                    st.session_state.dl_results = []
-                st.session_state.dl_results.append({
-                    "model_type": dl_model_type,
-                    "target": dl_target,
-                    "config": dl_config,
-                    "train_rmse": result["train_rmse"],
-                    "val_rmse": result["val_rmse"],
-                    "history": result["history"],
-                    "hpo": False,
-                })
-
-            except Exception as e:
-                st.error(f"Error al entrenar: {e}")
-                import traceback
-                st.code(traceback.format_exc())
 
         if st.session_state.get("dl_results"):
             st.divider()

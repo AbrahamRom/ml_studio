@@ -47,7 +47,7 @@ class Autoencoder(nn.Module):
         self.encoder = nn.Sequential(*encoder_layers)
 
         decoder_layers = []
-        dec_dims = encoding_dims + [input_dim]
+        dec_dims = encoding_dims[::-1] + [input_dim]
         for i in range(len(dec_dims) - 1):
             decoder_layers.append(nn.Linear(dec_dims[i], dec_dims[i + 1]))
             if i < len(dec_dims) - 2:
@@ -83,7 +83,7 @@ class VAE(nn.Module):
         self.fc_logvar = nn.Linear(encoding_dims[-1], encoding_dims[-1])
 
         decoder_layers = []
-        dec_dims = encoding_dims + [input_dim]
+        dec_dims = encoding_dims[::-1] + [input_dim]
         for i in range(len(dec_dims) - 1):
             decoder_layers.append(nn.Linear(dec_dims[i], dec_dims[i + 1]))
             if i < len(dec_dims) - 2:
@@ -259,6 +259,9 @@ def train_autoencoder(
     train_rmse = float(np.sqrt(np.mean((X_train - train_reconstructed) ** 2)))
     val_rmse = float(np.sqrt(np.mean((X_val - val_reconstructed) ** 2)))
 
+    train_errors = np.mean((X_train - train_reconstructed) ** 2, axis=1)
+    val_errors = np.mean((X_val - val_reconstructed) ** 2, axis=1)
+
     return {
         "model": model,
         "history": history,
@@ -270,6 +273,7 @@ def train_autoencoder(
         "train_reconstructed": train_reconstructed,
         "val_reconstructed": val_reconstructed,
         "encoding_dims": encoding_dims,
+        "reconstruction_error": np.concatenate([train_errors, val_errors]),
     }
 
 
@@ -354,6 +358,9 @@ def train_vae(
     train_rmse = float(np.sqrt(np.mean((X_train - train_recon) ** 2)))
     val_rmse = float(np.sqrt(np.mean((X_val - val_recon) ** 2)))
 
+    train_errors = np.mean((X_train - train_recon) ** 2, axis=1)
+    val_errors = np.mean((X_val - val_recon) ** 2, axis=1)
+
     return {
         "model": model,
         "history": history,
@@ -366,6 +373,7 @@ def train_vae(
         "val_reconstructed": val_recon,
         "encoding_dims": encoding_dims,
         "kl_weight": kl_weight,
+        "reconstruction_error": np.concatenate([train_errors, val_errors]),
     }
 
 

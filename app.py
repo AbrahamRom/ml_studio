@@ -18,6 +18,9 @@ for key in ["df", "task_type", "target_cols", "target_configs", "mode",
     if key not in st.session_state:
         st.session_state[key] = None
 
+if "saved_dl_models" not in st.session_state:
+    st.session_state.saved_dl_models = {}
+
 # ── Sidebar navigation ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## ⚗️ ML Studio")
@@ -31,6 +34,8 @@ with st.sidebar:
         "📊  Compare":        "4_compare",
         "🔬  Evaluate":       "5_evaluate",
         "🧠  Explainability": "6_explain",
+        "🧪  Test Models":    "7_test",
+        "🎨  Visual Train":   "8_visual_train",
     }
 
     if "page" not in st.session_state:
@@ -72,3 +77,7 @@ elif page == "5_evaluate":
     exec(open("pages/5_evaluate.py", encoding="utf-8").read())
 elif page == "6_explain":
     exec(open("pages/6_explain.py", encoding="utf-8").read())
+elif page == "7_test":
+    exec(open("pages/7_test.py", encoding="utf-8").read())
+elif page == "8_visual_train":
+    exec(open("pages/8_visual_train.py", encoding="utf-8").read())
