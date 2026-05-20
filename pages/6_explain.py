@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from utils.pagination import paginated_dataframe
 
 DARK = dict(
     paper_bgcolor="#0d0f14",
@@ -129,14 +130,14 @@ if model_source == "AutoML":
                 xaxis_title=f"Caída de score ({scoring})",
             )
             st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(perm_df.round(5), use_container_width=True, hide_index=True)
+            paginated_dataframe(perm_df.round(5), key="explain_perm_auto", height=350, hide_index=True)
 
     with tab3:
         leaderboard = result["leaderboard"].copy()
         direction = config["direction"]
         leaderboard["metric_value"] = pd.to_numeric(leaderboard["metric_value"], errors="coerce")
         leaderboard = leaderboard.sort_values("metric_value", ascending=(direction == "min"))
-        st.dataframe(leaderboard.round(4), use_container_width=True, hide_index=True)
+        paginated_dataframe(leaderboard.round(4), key="explain_lb", height=350, hide_index=True)
 
         model_type_counts = leaderboard["model_type"].value_counts()
         fig = go.Figure(
@@ -330,7 +331,7 @@ else:
                     xaxis_title="Aumento en RMSE",
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(perm_df.round(5), use_container_width=True, hide_index=True)
+                paginated_dataframe(perm_df.round(5), key="explain_perm_dl_seq", height=350, hide_index=True)
 
         with tab2:
             st.markdown("### Predicción manual con DL")
@@ -482,7 +483,7 @@ else:
                     xaxis_title="Aumento en MSE de reconstrucción",
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(perm_df.round(5), use_container_width=True, hide_index=True)
+                paginated_dataframe(perm_df.round(5), key="explain_perm_dl_unsup", height=350, hide_index=True)
 
         with tab2:
             st.markdown("### Análisis de reconstrucción")

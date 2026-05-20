@@ -12,6 +12,7 @@ from ml_pipeline.comparison import (
 )
 from ml_pipeline.quality import analyze_data_quality
 from ml_pipeline.tasks import infer_target_task, normalize_target_config, task_label
+from utils.pagination import paginated_dataframe
 
 warnings.filterwarnings("ignore")
 
@@ -212,27 +213,27 @@ with tab_automl:
                 st.json(errors)
             st.success(f"✅ Corrida `{run_id}` completada. Artefactos: `{run_path}`")
             st.markdown("### Tabla final target × tipo de modelo")
-            st.dataframe(compare_df.round(4), use_container_width=True)
+            paginated_dataframe(compare_df.round(4), key="train_compare", height=350)
             st.markdown("### Mejor modelo por target según holdout real")
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            paginated_dataframe(summary_df, key="train_summary", height=300, hide_index=True)
             st.markdown("### Mejor modelo + métricas (holdout real)")
             if best_metrics_df.empty:
                 st.info("No hay métricas detalladas para el mejor modelo.")
             else:
-                st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
+                paginated_dataframe(best_metrics_df.round(4), key="train_best_metrics", height=350, hide_index=True)
 
         elif st.session_state.automl_run:
             run = st.session_state.automl_run
             st.success(f"✅ Corrida AutoML disponible: `{run['run_id']}`")
             st.caption(f"Artefactos: `{run['base_path']}`")
             st.markdown("### Tabla final target × tipo de modelo")
-            st.dataframe(run["compare_df"].round(4), use_container_width=True)
+            paginated_dataframe(run["compare_df"].round(4), key="train_compare_loaded", height=350)
             st.markdown("### Mejor modelo por target según holdout real")
-            st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
+            paginated_dataframe(run["summary_df"], key="train_summary_loaded", height=300, hide_index=True)
             best_metrics_df = run.get("best_model_metrics_df")
             if best_metrics_df is not None and not best_metrics_df.empty:
                 st.markdown("### Mejor modelo + métricas (holdout real)")
-                st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
+                paginated_dataframe(best_metrics_df.round(4), key="train_best_loaded", height=350, hide_index=True)
             st.info("Ve a Compare / Evaluate / Explainability para más análisis.")
 
     elif st.session_state.target_cols:
@@ -297,7 +298,7 @@ with tab_automl:
             st.session_state.trained_models = target_results
             st.session_state.compare_df = compare_df
             st.success(f"✅ Corrida `{run_id}` completada.")
-            st.dataframe(compare_df.round(4), use_container_width=True)
+            paginated_dataframe(compare_df.round(4), key="train_compare_quick", height=350)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2: Deep Learning
@@ -585,7 +586,7 @@ with tab_dl:
                 else:
                     row["Status"] = "✅"
                 hpo_trials_df.append(row)
-            st.dataframe(pd.DataFrame(hpo_trials_df), use_container_width=True, hide_index=True)
+            paginated_dataframe(pd.DataFrame(hpo_trials_df), key="train_hpo_trials", height=350, hide_index=True)
 
             st.markdown("### 🏆 Mejor configuración encontrada")
             st.json(hpo_result["best_config"])
@@ -646,4 +647,4 @@ with tab_dl:
                     "Epochs": len(r["history"]["train_loss"]),
                     "HPO": "✅" if r.get("hpo") else "❌",
                 })
-            st.dataframe(pd.DataFrame(dl_hist), use_container_width=True, hide_index=True)
+            paginated_dataframe(pd.DataFrame(dl_hist), key="train_dl_history", height=350, hide_index=True)

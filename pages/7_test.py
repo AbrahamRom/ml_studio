@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import torch
+from utils.pagination import paginated_dataframe
 
 DARK = dict(
     paper_bgcolor="#0d0f14",
@@ -18,7 +19,11 @@ if st.session_state.get("df") is None:
     st.stop()
 
 df = st.session_state.get("df").copy()
-saved_models = st.session_state.get("saved_dl_models", {})
+
+saved_models = {}
+saved_models.update(st.session_state.get("saved_dl_models", {}))
+saved_models.update(st.session_state.get("saved_classic_models", {}))
+saved_models.update(st.session_state.get("saved_automl_models", {}))
 
 if not saved_models:
     st.warning("⚠️ No hay modelos guardados. Entrena y guarda modelos en **Visual Train** primero.")
@@ -88,7 +93,13 @@ for idx, run in enumerate(st.session_state.test_runs):
         
         # Determine which columns need input
         is_sequence = model_type in ("lstm", "gru")
-        input_cols = metadata.get("input_cols", feature_cols) if is_sequence else feature_cols
+        is_classic = model_type == "classic"
+        if is_classic:
+            input_cols = m_info.get("feature_cols", feature_cols)
+        elif is_sequence:
+            input_cols = metadata.get("input_cols", feature_cols)
+        else:
+            input_cols = feature_cols
         
         # Input source
         source_options = ["Seleccionar fila del dataset"]
@@ -149,12 +160,61 @@ for idx, run in enumerate(st.session_state.test_runs):
         # Run button for this test
         if st.button("▶️ Ejecutar", type="primary", key=f"test_run_{idx}"):
             try:
-                row_data = input_row[input_cols].values.astype(float)
-                row_data = np.nan_to_num(row_data, nan=0.0)
-                
                 result = {"model": m_name, "type": model_type}
                 
-                if model_type in ("autoencoder", "vae"):
+                if model_type == "automl":
+                    feature_cols = m_info["feature_cols"]
+                    automl_obj = m_info["automl"]
+                    task = m_info.get("task", "classification")
+                    
+                    row_data = input_row[feature_cols]
+                    pred = automl_obj.predict(row_data)[0]
+                    
+                    if task == "classification":
+                        result["prediction"] = str(pred)
+                        result["prediction_value"] = str(pred)
+                        try:
+                            proba = automl_obj.predict_proba(row_data)[0].tolist()
+                            result["probabilities"] = proba
+                            result["output_values"] = {"prediction": str(pred)}
+                            for i, p in enumerate(proba):
+                                result["output_values"][f"prob_class_{i}"] = float(p)
+                        except Exception:
+                            result["output_values"] = {"prediction": str(pred)}
+                    else:
+                        result["prediction"] = float(pred)
+                        result["output_values"] = {"prediction": float(pred)}
+                    
+                elif model_type == "classic":
+                    feature_cols = m_info["feature_cols"]
+                    scaler = m_info["scaler"]
+                    le = m_info.get("label_encoder")
+                    task = m_info.get("task", "classification")
+                    
+                    row_data = input_row[feature_cols].values.astype(float)
+                    row_data = np.nan_to_num(row_data, nan=0.0)
+                    row_scaled = scaler.transform(row_data)
+                    
+                    model = m_info["model"]
+                    pred = model.predict(row_scaled)[0]
+                    
+                    if le:
+                        pred_label = str(le.inverse_transform([int(pred)])[0])
+                        proba = None
+                        if hasattr(model, "predict_proba"):
+                            proba = model.predict_proba(row_scaled)[0].tolist()
+                        result["prediction"] = pred_label
+                        result["prediction_value"] = float(pred)
+                        result["probabilities"] = proba
+                        result["output_values"] = {"prediction": pred_label}
+                        if proba:
+                            for i, p in enumerate(proba):
+                                result["output_values"][f"prob_class_{i}"] = float(p)
+                    else:
+                        result["prediction"] = float(pred)
+                        result["output_values"] = {"prediction": float(pred)}
+                    
+                elif model_type in ("autoencoder", "vae"):
                     scaler = m_info["scaler"]
                     if scaler:
                         row_scaled = scaler.transform(row_data)
@@ -163,7 +223,8 @@ for idx, run in enumerate(st.session_state.test_runs):
                     
                     x = torch.tensor(row_scaled, dtype=torch.float32)
                     with torch.no_grad():
-                        recon = m_info["model"](x).numpy()
+                        output = m_info["model"](x)
+                        recon = output[0].numpy() if isinstance(output, tuple) else output.numpy()
                     
                     error = float(np.mean((row_scaled - recon) ** 2))
                     train_errors = metadata.get("reconstruction_error")
@@ -212,7 +273,30 @@ for idx, run in enumerate(st.session_state.test_runs):
             else:
                 st.success("✅ Ejecutado")
                 
-                if res["type"] in ("autoencoder", "vae"):
+                if res["type"] == "automl":
+                    st.metric("Predicción", str(res.get("prediction", "-")))
+                    if res.get("probabilities"):
+                        task = m_info.get("task", "classification")
+                        classes = list(df[m_info["target_col"]].dropna().unique())
+                        prob_df = pd.DataFrame([{"Clase": str(c), "Probabilidad": p} for c, p in zip(classes, res["probabilities"])])
+                        st.dataframe(prob_df, use_container_width=True, hide_index=True)
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=prob_df["Clase"], y=prob_df["Probabilidad"], marker_color="#2dd4bf", text=prob_df["Probabilidad"].round(3), textposition="outside"))
+                        fig.update_layout(title="Probabilidades por clase", **DARK, height=300)
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                elif res["type"] == "classic":
+                    st.metric("Predicción", str(res.get("prediction", "-")))
+                    if res.get("probabilities"):
+                        classes = list(df[m_info["target_col"]].dropna().unique())
+                        prob_df = pd.DataFrame([{"Clase": str(c), "Probabilidad": p} for c, p in zip(classes, res["probabilities"])])
+                        st.dataframe(prob_df, use_container_width=True, hide_index=True)
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=prob_df["Clase"], y=prob_df["Probabilidad"], marker_color="#2dd4bf", text=prob_df["Probabilidad"].round(3), textposition="outside"))
+                        fig.update_layout(title="Probabilidades por clase", **DARK, height=300)
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                elif res["type"] in ("autoencoder", "vae"):
                     st.metric("Error de reconstrucción", f"{res['error']:.6f}")
                     st.metric("Estado", res["anomaly"])
                     
@@ -241,7 +325,15 @@ if len(completed) > 1:
     for r in completed:
         res = r["result"]
         row = {"Prueba": r["model_name"], "Tipo": res["type"].upper()}
-        if res["type"] in ("autoencoder", "vae"):
+        if res["type"] == "automl":
+            row["Error"] = "-"
+            row["Estado"] = "-"
+            row["Predicción"] = str(res.get("prediction", "-"))
+        elif res["type"] == "classic":
+            row["Error"] = "-"
+            row["Estado"] = "-"
+            row["Predicción"] = str(res.get("prediction", "-"))
+        elif res["type"] in ("autoencoder", "vae"):
             row["Error"] = res.get("error", "-")
             row["Estado"] = res.get("anomaly", "-")
             row["Predicción"] = "-"

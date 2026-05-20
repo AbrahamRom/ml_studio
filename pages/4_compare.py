@@ -1,6 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from utils.pagination import paginated_dataframe
 
 DARK = dict(
     paper_bgcolor="#0d0f14",
@@ -89,13 +90,13 @@ with tab1:
 
         if rows:
             df_comp = pd.DataFrame(rows)
-            st.dataframe(df_comp, use_container_width=True, hide_index=True)
+            paginated_dataframe(df_comp, key="compare_dl", height=350, hide_index=True)
         else:
             st.info("No hay resultados para este target.")
 
         if summary_df is not None and not summary_df.empty:
             st.markdown("### Resumen AutoML por target")
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            paginated_dataframe(summary_df, key="compare_summary", height=300, hide_index=True)
 
     else:
         st.info("No hay targets configurados.")
@@ -163,7 +164,7 @@ with tab3:
                     "Métricas": result["metrics_path"],
                 }
             )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        paginated_dataframe(pd.DataFrame(rows), key="compare_artifacts", height=300, hide_index=True)
     else:
         st.info("No hay corrida AutoML disponible.")
 
@@ -210,6 +211,6 @@ with tab4:
                     ascending = False
                 detailed_df = detailed_df.sort_values(sort_column, ascending=ascending)
 
-            st.dataframe(detailed_df.round(4), use_container_width=True, hide_index=True)
+            paginated_dataframe(detailed_df.round(4), key="compare_detailed", height=400, hide_index=True)
     else:
         st.info("No hay corrida AutoML disponible.")

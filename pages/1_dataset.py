@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from utils.pagination import paginated_dataframe
 
 st.markdown("# 📂 Dataset")
 st.markdown('<div class="section-header">Load & Configure</div>', unsafe_allow_html=True)
@@ -107,7 +108,7 @@ if st.session_state.df is not None:
         st.markdown(f'<div class="metric-card"><div class="val">{dupes}</div><div class="label">Duplicados</div></div>', unsafe_allow_html=True)
 
     st.markdown("### Vista previa")
-    st.dataframe(df.head(20), use_container_width=True)
+    paginated_dataframe(df, key="dataset_preview", height=450)
 
     st.divider()
     st.info("⚙️ Configura los targets y entrena modelos en la sección **🏋️ Entrenar Modelos**.")

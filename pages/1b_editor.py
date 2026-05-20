@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from utils.pagination import paginated_dataframe
 
 st.markdown("# 🛠️ Editor de Dataset")
 st.markdown('<div class="section-header">Editar, eliminar y crear columnas</div>', unsafe_allow_html=True)
@@ -81,7 +82,7 @@ with tab_nulls:
             "Nulos": cols_with_nulls.values,
             "%": (cols_with_nulls.values / len(df) * 100).round(2),
         })
-        st.dataframe(null_df, use_container_width=True, hide_index=True)
+        paginated_dataframe(null_df, key="editor_nulls", height=300, hide_index=True)
 
         st.divider()
         st.markdown("#### Opciones de limpieza")
@@ -763,5 +764,4 @@ if st.button("💾  Guardar archivo", type="primary", key="save_dataset_btn"):
 # ── Current dataset preview ────────────────────────────────────────────────────
 st.divider()
 st.markdown(f"### Dataset actual ({len(st.session_state.df):,} filas, {len(st.session_state.df.columns)} columnas)")
-st.caption("Mostrando primeras 20 filas. El dataset completo se conserva en memoria.")
-st.dataframe(st.session_state.df.head(20), use_container_width=True)
+paginated_dataframe(st.session_state.df, key="editor_preview", height=450)

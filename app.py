@@ -21,6 +21,12 @@ for key in ["df", "task_type", "target_cols", "target_configs", "mode",
 if "saved_dl_models" not in st.session_state:
     st.session_state.saved_dl_models = {}
 
+if "saved_classic_models" not in st.session_state:
+    st.session_state.saved_classic_models = {}
+
+if "saved_automl_models" not in st.session_state:
+    st.session_state.saved_automl_models = {}
+
 # ── Sidebar navigation ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## ⚗️ ML Studio")

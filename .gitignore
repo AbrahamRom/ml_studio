@@ -31,3 +31,5 @@ Thumbs.db
 artifacts/
 
 .idea
+
+mljar_results

@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+from utils.pagination import paginated_dataframe
 
 DARK = dict(
     paper_bgcolor="#0d0f14",
@@ -90,7 +91,7 @@ if model_source == "AutoML":
 
         with tab2:
             report = pd.DataFrame(metrics["classification_report"]).T.round(4)
-            st.dataframe(report, use_container_width=True)
+            paginated_dataframe(report, key="eval_class_report", height=350)
 
         with tab3:
             if proba is None:
@@ -124,7 +125,7 @@ if model_source == "AutoML":
             preview["y_real"] = y_true
             preview["y_pred"] = y_pred
             preview["correcto"] = preview["y_real"] == preview["y_pred"]
-            st.dataframe(preview.head(100), use_container_width=True)
+            paginated_dataframe(preview, key="eval_pred_preview", height=400)
 
     else:
         c1, c2, c3, c4 = st.columns(4)
@@ -185,7 +186,7 @@ if model_source == "AutoML":
                 {"Artefacto": "métricas", "Ruta": result["metrics_path"]},
             ]
         )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        paginated_dataframe(pd.DataFrame(rows), key="eval_artifacts", height=250, hide_index=True)
 
 # ── Deep Learning evaluation ───────────────────────────────────────────────────
 else:
@@ -319,7 +320,7 @@ else:
                     "y_pred": np.round(val_pred[:100], 4),
                     "error": np.round(y_val_actual[:100] - val_pred[:100], 4),
                 })
-                st.dataframe(preview, use_container_width=True)
+                paginated_dataframe(preview, key="eval_dl_preview", height=400)
 
     st.divider()
     st.markdown("### 📋 Configuración usada")
