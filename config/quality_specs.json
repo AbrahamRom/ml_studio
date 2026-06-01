@@ -1,6 +1,7 @@
 {
   "protein_concentration": {
     "aliases": [
+      "concent_prot_ug_ml_envasada",
       "Protein concentration (ug/mL)",
       "Protein concentration",
       "protein_concentration_ug_ml"
@@ -27,6 +28,7 @@
   },
   "polysaccharide_concentration": {
     "aliases": [
+      "concent_polisac_ug_ml_envasada",
       "Polysaccharide concentration (ug/mL)",
       "Polysaccharide concentration",
       "polysaccharide_concentration_ug_ml"
@@ -53,6 +55,7 @@
   },
   "protein_adsorption": {
     "aliases": [
+      "adsorc_prot_porcentaje_envasada",
       "Protein adsorption (%)",
       "Protein adsorption",
       "protein_adsorption_percent"
@@ -78,6 +81,7 @@
   },
   "polysaccharide_adsorption": {
     "aliases": [
+      "adsorc_polisac_porcentaje_envasada",
       "Polysaccharide adsorption (%)",
       "Polysaccharide adsorption",
       "polysaccharide_adsorption_percent"
@@ -103,6 +107,7 @@
   },
   "ph": {
     "aliases": [
+      "ph_envasada",
       "pH",
       "ph"
     ],
@@ -128,6 +133,7 @@
   },
   "thimerosal_concentration": {
     "aliases": [
+      "concent_tiomersal_mg_ml_envasada",
       "Thimerosal concentration (mg/mL)",
       "Thimerosal concentration",
       "thimerosal_concentration_mg_ml"
@@ -154,6 +160,7 @@
   },
   "aloh3_concentration": {
     "aliases": [
+      "concent_al_oh_3_mg_ml_envasada",
       "Al(OH)3 concentration (mg/mL)",
       "Al(OH)3 concentration",
       "aloh3_concentration_mg_ml"
@@ -180,6 +187,7 @@
   },
   "average_vial_content": {
     "aliases": [
+      "conten_promed_bbo_ml_envasada",
       "Average vial content (mL)",
       "Average vial content",
       "average_vial_content_ml"
@@ -205,6 +213,7 @@
   },
   "endotoxin_content": {
     "aliases": [
+      "conten_endotoxinas_ue_ml_envasada",
       "Endotoxin content (EU/mL)",
       "Endotoxin content",
       "endotoxin_content_eu_ml"
@@ -230,6 +239,7 @@
   },
   "mouse_antibody_activity": {
     "aliases": [
+      "inmunog_activ_antic_igg_envasada",
       "Mouse antibody activity",
       "mouse_antibody_activity"
     ],
@@ -253,6 +263,7 @@
   },
   "bactericidal_activity": {
     "aliases": [
+      "inmunog_activ_antic_bact_envasada",
       "Bactericidal activity",
       "bactericidal_activity"
     ],
