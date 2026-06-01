@@ -254,6 +254,12 @@ elif st.session_state.automl_run:
     st.markdown("### Mejor modelo por target según holdout real")
     st.dataframe(run["summary_df"], use_container_width=True, hide_index=True)
     best_metrics_df = run.get("best_model_metrics_df")
+    required_scale_cols = {"Holdout min", "Holdout max", "Holdout media", "Holdout mediana"}
+    if best_metrics_df is None or best_metrics_df.empty or not required_scale_cols.issubset(
+        best_metrics_df.columns
+    ):
+        best_metrics_df = build_best_model_metrics(run.get("target_results", {}))
+
     if best_metrics_df is not None and not best_metrics_df.empty:
         st.markdown("### Mejor modelo + métricas (holdout real)")
         st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)

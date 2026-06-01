@@ -32,7 +32,10 @@ if compare_df is None or compare_df.empty:
     compare_df = build_final_matrix(target_results)
 if summary_df is None or summary_df.empty:
     summary_df = build_target_summary(target_results)
-if best_metrics_df is None or best_metrics_df.empty:
+required_scale_cols = {"Holdout min", "Holdout max", "Holdout media", "Holdout mediana"}
+if best_metrics_df is None or best_metrics_df.empty or not required_scale_cols.issubset(
+    best_metrics_df.columns
+):
     best_metrics_df = build_best_model_metrics(target_results)
 
 st.caption(f"Corrida `{run['run_id']}` · Artefactos `{run['base_path']}`")
@@ -74,7 +77,9 @@ with tab1:
 
     if best_metrics_df is not None and not best_metrics_df.empty:
         st.markdown("### Mejor modelo + métricas (holdout real)")
-        st.caption("Cada fila resume el modelo ganador por target con todas sus métricas de holdout.")
+        st.caption(
+            "Cada fila resume el modelo ganador por target con todas sus métricas de holdout y la escala del target."
+        )
         st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
 
 with tab2:

@@ -5,6 +5,32 @@ from __future__ import annotations
 import pandas as pd
 
 
+def _holdout_target_scale_stats(result: dict) -> dict:
+    y_true = result.get("y_test")
+    if y_true is None:
+        prediction_frame = result.get("prediction_frame")
+        if isinstance(prediction_frame, pd.DataFrame) and "y_true" in prediction_frame.columns:
+            y_true = prediction_frame["y_true"]
+
+    if y_true is None:
+        return {}
+
+    series = pd.Series(y_true).dropna()
+    if series.empty:
+        return {}
+
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return {}
+
+    return {
+        "Holdout min": float(numeric.min()),
+        "Holdout max": float(numeric.max()),
+        "Holdout media": float(numeric.mean()),
+        "Holdout mediana": float(numeric.median()),
+    }
+
+
 def _best_by_direction(df: pd.DataFrame, direction: str) -> pd.DataFrame:
     if df.empty:
         return df
@@ -138,6 +164,10 @@ def build_best_model_metrics(target_results: dict) -> pd.DataFrame:
         }
         if selected_metric:
             row["Métrica usada"] = selected_metric
+
+        scale_stats = _holdout_target_scale_stats(result)
+        if scale_stats:
+            row.update(scale_stats)
 
         metric_columns = [
             column

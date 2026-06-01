@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import warnings
+import math
 from sklearn.model_selection import train_test_split
 
 from .artifacts import save_dataframe, save_json, target_dir
@@ -34,22 +36,99 @@ FULL_MLJAR_ALGORITHMS = [
 ]
 
 
-def _train_test_split(X, y, task: str, test_size: float, random_state: int):
-    stratify = None
-    if task == "classification":
-        counts = y.value_counts(dropna=False)
-        if len(counts) > 1 and int(counts.min()) >= 2:
-            stratify = y
-    try:
-        return train_test_split(
-            X,
-            y,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=stratify,
+def _train_test_split(
+    X, y, task: str, test_size: float, random_state: int, split_method: str = "random", time_col: str | None = None
+):
+    """Support random split (default) and temporal split by `time_col`.
+
+    Temporal split: keep all rows with `time_col` <= cutoff for train and > cutoff for test.
+    The cutoff year/value is chosen so that the test set contains at least `test_size` proportion
+    of the samples. If `time_col` is missing/invalid or the temporal split would produce empty
+    train/test partitions, falls back to random `train_test_split`.
+    """
+    # Helper: perform original random split with stratify when appropriate
+    def _random_split():
+        stratify = None
+        if task == "classification":
+            counts = y.value_counts(dropna=False)
+            if len(counts) > 1 and int(counts.min()) >= 2:
+                stratify = y
+        try:
+            return train_test_split(
+                X,
+                y,
+                test_size=test_size,
+                random_state=random_state,
+                stratify=stratify,
+            )
+        except ValueError:
+            return train_test_split(X, y, test_size=test_size, random_state=random_state)
+
+    if split_method != "temporal":
+        return _random_split()
+
+    # Temporal split requested
+    if time_col is None:
+        warnings.warn("Temporal split requested but no time_col provided; falling back to random split")
+        return _random_split()
+
+    if time_col not in X.columns:
+        warnings.warn(
+            f"time_col '{time_col}' not found in feature columns; falling back to random split"
         )
-    except ValueError:
-        return train_test_split(X, y, test_size=test_size, random_state=random_state)
+        return _random_split()
+
+    if X[time_col].isna().any():
+        warnings.warn(f"time_col '{time_col}' contains nulls; falling back to random split")
+        return _random_split()
+
+    # Build combined frame to keep alignment
+    df_comb = X.copy()
+    df_comb = df_comb.assign(_target=y)
+
+    # Unique sorted values for cutoff selection
+    try:
+        unique_vals = sorted(pd.Series(df_comb[time_col].dropna().unique()).tolist())
+    except Exception:
+        warnings.warn(f"Could not sort values of '{time_col}'; falling back to random split")
+        return _random_split()
+
+    if not unique_vals:
+        warnings.warn(f"No valid values in '{time_col}'; falling back to random split")
+        return _random_split()
+
+    n_total = len(df_comb)
+    required_test_n = int(math.ceil(test_size * n_total))
+
+    cutoff = None
+    for val in unique_vals:
+        test_n = int((df_comb[time_col] > val).sum())
+        if test_n >= required_test_n:
+            cutoff = val
+            break
+
+    if cutoff is None:
+        # Can't reach required proportion by year cutoff; choose closest (oldest)
+        cutoff = unique_vals[0]
+        warnings.warn(
+            f"No cutoff value yields required test_size; using closest cutoff='{cutoff}' (test may be smaller than requested)"
+        )
+
+    train_mask = df_comb[time_col] <= cutoff
+    test_mask = df_comb[time_col] > cutoff
+
+    if train_mask.sum() == 0 or test_mask.sum() == 0:
+        warnings.warn(
+            "Temporal split produced empty train or test partition; falling back to random split"
+        )
+        return _random_split()
+
+    X_train = X.loc[train_mask]
+    X_test = X.loc[test_mask]
+    y_train = y.loc[train_mask]
+    y_test = y.loc[test_mask]
+
+    return X_train, X_test, y_train, y_test
 
 
 def _best_leaderboard_row(leaderboard: pd.DataFrame, direction: str) -> dict:
@@ -266,6 +345,8 @@ def run_target_automl(
     mode: str = "Perform",
     algorithms: list[str] | None = None,
     random_state: int = 42,
+    split_method: str = "random",
+    time_col: str | None = None,
     n_jobs: int = -1,
 ) -> dict:
     """Train one independent AutoML model for a target and persist artifacts."""
@@ -293,7 +374,13 @@ def run_target_automl(
         raise ValueError(f"Target '{target}' debe ser numérico para entrenar regresión.")
 
     X_train, X_test, y_train, y_test = _train_test_split(
-        X, y, config["task"], test_size, random_state
+        X,
+        y,
+        config["task"],
+        test_size,
+        random_state,
+        split_method=split_method,
+        time_col=time_col,
     )
 
     t_dir = target_dir(run_path, target)
