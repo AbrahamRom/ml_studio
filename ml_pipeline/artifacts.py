@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .early_warning import load_quality_specs, resolve_quality_spec
+
 
 DEFAULT_RUNS_DIR = Path("artifacts") / "automl_runs"
 
@@ -154,11 +156,23 @@ def load_target_artifacts(
     )
     predictions_path = Path(result.get("predictions_path") or target_path / "predictions.csv")
     metrics_path = Path(result.get("metrics_path") or target_path / "holdout_metrics.json")
+    calibration_residuals_path = Path(
+        result.get("calibration_residuals_path") or target_path / "calibration_residuals.csv"
+    )
+    early_warning_predictions_path = Path(
+        result.get("early_warning_predictions_path") or target_path / "early_warning_predictions.csv"
+    )
+    early_warning_metrics_path = Path(
+        result.get("early_warning_metrics_path") or target_path / "early_warning_metrics.json"
+    )
 
     result["leaderboard_path"] = str(leaderboard_path)
     result["per_model_metrics_path"] = str(per_model_metrics_path)
     result["predictions_path"] = str(predictions_path)
     result["metrics_path"] = str(metrics_path)
+    result["calibration_residuals_path"] = str(calibration_residuals_path)
+    result["early_warning_predictions_path"] = str(early_warning_predictions_path)
+    result["early_warning_metrics_path"] = str(early_warning_metrics_path)
     result.setdefault("results_path", str(target_path / "mljar"))
 
     plot_paths = result.get("plot_paths") or _infer_plot_paths(target_path)
@@ -168,6 +182,9 @@ def load_target_artifacts(
     per_model_metrics = read_dataframe(per_model_metrics_path)
     prediction_frame = read_dataframe(predictions_path)
     holdout_metrics = read_json(metrics_path) or {}
+    calibration_residuals_frame = read_dataframe(calibration_residuals_path)
+    early_warning_predictions = read_dataframe(early_warning_predictions_path)
+    early_warning_metrics = read_json(early_warning_metrics_path) or {}
 
     y_true = None
     y_pred = None
@@ -196,6 +213,7 @@ def load_target_artifacts(
 
     proba_cols = [col for col in prediction_frame.columns if col.startswith("proba_")]
     proba = prediction_frame[proba_cols].to_numpy() if proba_cols else None
+    _, quality_spec = resolve_quality_spec(target, load_quality_specs())
 
     return {
         **result,
@@ -210,6 +228,15 @@ def load_target_artifacts(
         "predictions": predictions,
         "prediction_frame": prediction_frame,
         "proba": proba,
+        "calibration_residuals_frame": calibration_residuals_frame,
+        "calibration_residuals": (
+            calibration_residuals_frame["residual"].to_numpy()
+            if "residual" in calibration_residuals_frame.columns
+            else None
+        ),
+        "early_warning_predictions": early_warning_predictions,
+        "early_warning_metrics": early_warning_metrics,
+        "quality_spec": quality_spec,
     }
 
 

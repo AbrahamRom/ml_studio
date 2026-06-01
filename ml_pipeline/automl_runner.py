@@ -12,6 +12,13 @@ import math
 from sklearn.model_selection import train_test_split
 
 from .artifacts import save_dataframe, save_json, target_dir
+from .early_warning import (
+    compute_early_warning_metrics,
+    compute_early_warning_predictions,
+    fit_residual_uncertainty,
+    load_quality_specs,
+    resolve_quality_spec,
+)
 from .metrics import compute_holdout_metrics
 from .plots import save_evaluation_plots
 from .tasks import normalize_target_config
@@ -129,6 +136,50 @@ def _train_test_split(
     y_test = y.loc[test_mask]
 
     return X_train, X_test, y_train, y_test
+
+
+def _train_calibration_split(
+    X: pd.DataFrame,
+    y: pd.Series,
+    task: str,
+    calibration_size: float,
+    random_state: int,
+):
+    """Reserve part of the training data for residual uncertainty calibration."""
+
+    empty_X = X.iloc[0:0].copy()
+    empty_y = y.iloc[0:0].copy()
+    if calibration_size <= 0 or len(X) < 5:
+        return X, empty_X, y, empty_y
+
+    calibration_count = int(math.ceil(len(X) * calibration_size))
+    if calibration_count < 1 or len(X) - calibration_count < 2:
+        return X, empty_X, y, empty_y
+
+    stratify = None
+    if task == "classification":
+        counts = y.value_counts(dropna=False)
+        if len(counts) > 1 and int(counts.min()) >= 2:
+            stratify = y
+
+    try:
+        return train_test_split(
+            X,
+            y,
+            test_size=calibration_count,
+            random_state=random_state,
+            stratify=stratify,
+        )
+    except ValueError:
+        try:
+            return train_test_split(
+                X,
+                y,
+                test_size=calibration_count,
+                random_state=random_state,
+            )
+        except ValueError:
+            return X, empty_X, y, empty_y
 
 
 def _best_leaderboard_row(leaderboard: pd.DataFrame, direction: str) -> dict:
@@ -341,6 +392,7 @@ def run_target_automl(
     all_targets: list[str] | None = None,
     run_path: str | Path,
     test_size: float = 0.2,
+    calibration_size: float = 0.2,
     total_time_limit: int = 180,
     mode: str = "Perform",
     algorithms: list[str] | None = None,
@@ -373,7 +425,7 @@ def run_target_automl(
     if config["task"] == "regression" and not pd.api.types.is_numeric_dtype(y):
         raise ValueError(f"Target '{target}' debe ser numérico para entrenar regresión.")
 
-    X_train, X_test, y_train, y_test = _train_test_split(
+    X_train_full, X_test, y_train_full, y_test = _train_test_split(
         X,
         y,
         config["task"],
@@ -381,6 +433,13 @@ def run_target_automl(
         random_state,
         split_method=split_method,
         time_col=time_col,
+    )
+    X_train, X_calib, y_train, y_calib = _train_calibration_split(
+        X_train_full,
+        y_train_full,
+        config["task"],
+        calibration_size,
+        random_state,
     )
 
     t_dir = target_dir(run_path, target)
@@ -417,14 +476,6 @@ def run_target_automl(
             proba = None
             proba_classes = None
 
-    holdout_metrics = compute_holdout_metrics(
-        config["task"],
-        y_test,
-        y_pred,
-        proba,
-        n_features=len(feature_cols),
-        proba_classes=proba_classes,
-    )
     leaderboard = automl.get_leaderboard(original_metric_values=True)
     per_model_metrics = _collect_model_metrics(
         automl,
@@ -435,6 +486,28 @@ def run_target_automl(
     )
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
     best_holdout_row = _best_holdout_row(per_model_metrics, config)
+    best_model_name = best_holdout_row.get("model_name")
+
+    selected_y_pred, selected_proba, selected_proba_classes = predict_with_model(
+        automl,
+        best_model_name,
+        X_test,
+        config["task"],
+    )
+    if selected_y_pred is not None:
+        y_pred = selected_y_pred
+        if config["task"] == "classification":
+            proba = selected_proba
+            proba_classes = selected_proba_classes
+
+    holdout_metrics = compute_holdout_metrics(
+        config["task"],
+        y_test,
+        y_pred,
+        proba,
+        n_features=len(feature_cols),
+        proba_classes=proba_classes,
+    )
 
     pred_df = pd.DataFrame(
         {
@@ -448,6 +521,86 @@ def run_target_automl(
         proba_df = pd.DataFrame(proba).add_prefix("proba_")
         pred_df = pd.concat([pred_df.reset_index(drop=True), proba_df.reset_index(drop=True)], axis=1)
 
+    calibration_residuals = None
+    early_warning_predictions = pd.DataFrame()
+    early_warning_metrics = {}
+    early_warning_error = None
+    calibration_residuals_path = None
+    early_warning_predictions_path = None
+    early_warning_metrics_path = None
+    quality_spec_key = None
+    quality_spec = None
+
+    if config["task"] == "regression":
+        specs = load_quality_specs()
+        quality_spec_key, quality_spec = resolve_quality_spec(target, specs)
+        if quality_spec is not None:
+            try:
+                calib_pred, _, _ = predict_with_model(
+                    automl,
+                    best_model_name,
+                    X_calib,
+                    config["task"],
+                )
+                if calib_pred is None and not X_calib.empty:
+                    calib_pred = _coerce_1d_prediction(automl.predict(X_calib))
+                if calib_pred is None or X_calib.empty:
+                    raise ValueError("No hay particion de calibracion disponible.")
+
+                calibration_residuals = fit_residual_uncertainty(y_calib, calib_pred)
+                residual_df = pd.DataFrame(
+                    {
+                        "row_index": X_calib.index,
+                        "target": target,
+                        "y_true": y_calib.to_numpy(),
+                        "y_pred": calib_pred,
+                        "residual": calibration_residuals,
+                    }
+                )
+                early_warning_predictions = compute_early_warning_predictions(
+                    y_test,
+                    y_pred,
+                    calibration_residuals,
+                    quality_spec,
+                    row_index=X_test.index,
+                    target=target,
+                )
+                early_warning_metrics = compute_early_warning_metrics(early_warning_predictions)
+                early_warning_metrics.update(
+                    {
+                        "quality_spec_key": quality_spec_key,
+                        "calibration_rows": int(len(X_calib)),
+                        "residual_count": int(len(calibration_residuals)),
+                    }
+                )
+                calibration_residuals_path = save_dataframe(
+                    t_dir / "calibration_residuals.csv",
+                    residual_df,
+                )
+                early_warning_predictions_path = save_dataframe(
+                    t_dir / "early_warning_predictions.csv",
+                    early_warning_predictions,
+                )
+                early_warning_metrics_path = save_json(
+                    t_dir / "early_warning_metrics.json",
+                    early_warning_metrics,
+                )
+            except Exception as exc:
+                early_warning_error = str(exc)
+
+    if not early_warning_predictions.empty:
+        ew_cols = [
+            col
+            for col in early_warning_predictions.columns
+            if col not in {"row_index", "target", "y_true", "y_pred"}
+        ]
+        if ew_cols:
+            pred_df = pred_df.merge(
+                early_warning_predictions[["row_index", *ew_cols]],
+                on="row_index",
+                how="left",
+            )
+
     leaderboard_path = save_dataframe(t_dir / "leaderboard.csv", leaderboard)
     per_model_metrics_path = save_dataframe(t_dir / "per_model_metrics.csv", per_model_metrics)
     predictions_path = save_dataframe(t_dir / "predictions.csv", pred_df)
@@ -459,14 +612,20 @@ def run_target_automl(
         "config": config,
         "feature_cols": feature_cols,
         "train_rows": int(len(X_train)),
+        "calibration_rows": int(len(X_calib)),
         "test_rows": int(len(X_test)),
         "results_path": str(mljar_path),
         "leaderboard_path": str(leaderboard_path),
         "per_model_metrics_path": str(per_model_metrics_path),
         "predictions_path": str(predictions_path),
         "metrics_path": str(metrics_path),
+        "calibration_residuals_path": str(calibration_residuals_path) if calibration_residuals_path else None,
+        "early_warning_predictions_path": str(early_warning_predictions_path) if early_warning_predictions_path else None,
+        "early_warning_metrics_path": str(early_warning_metrics_path) if early_warning_metrics_path else None,
+        "early_warning_error": early_warning_error,
+        "quality_spec_key": quality_spec_key,
         "plot_paths": plot_paths,
-        "best_model_name": best_holdout_row.get("model_name"),
+        "best_model_name": best_model_name,
         "best_model_type": best_holdout_row.get("model_type"),
         "best_metric_value": best_holdout_row.get(best_holdout_row.get("selected_metric")),
         "best_model_metric": best_holdout_row.get("selected_metric"),
@@ -489,4 +648,8 @@ def run_target_automl(
         "predictions": pd.Series(y_pred, index=X_test.index, name="y_pred"),
         "prediction_frame": pred_df,
         "proba": proba,
+        "calibration_residuals": calibration_residuals,
+        "early_warning_predictions": early_warning_predictions,
+        "early_warning_metrics": early_warning_metrics,
+        "quality_spec": quality_spec,
     }

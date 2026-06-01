@@ -30,6 +30,7 @@ with st.sidebar:
         "📊  Compare":        "4_compare",
         "🔬  Evaluate":       "5_evaluate",
         "🧠  Explainability": "6_explain",
+        "🚨  Early Warning":  "7_early_warning",
     }
 
     if "page" not in st.session_state:
@@ -69,3 +70,5 @@ elif page == "5_evaluate":
     exec(open("pages/5_evaluate.py").read())
 elif page == "6_explain":
     exec(open("pages/6_explain.py").read())
+elif page == "7_early_warning":
+    exec(open("pages/7_early_warning.py").read())

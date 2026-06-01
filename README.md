@@ -23,7 +23,7 @@ streamlit run app.py
 ## Flujo del pipeline
 
 ```text
-📂 Dataset  →  🔍 EDA  →  🏋️ Train  →  📊 Compare  →  🔬 Evaluate  →  🧠 Explain
+📂 Dataset  →  🔍 EDA  →  🏋️ Train  →  📊 Compare  →  🔬 Evaluate  →  🚨 Early Warning  →  🧠 Explain
 ```
 
 ### 1. 📂 Dataset
@@ -57,7 +57,12 @@ streamlit run app.py
 - Clasificación: accuracy, F1, precision, recall, matriz de confusión y curvas binarias cuando hay probabilidades.
 - Regresión: score global compuesto, R², R² ajustado, MAE, RMSE, MAPE, SMAPE, real vs predicho, residuos y distribución de error.
 
-### 6. 🧠 Explainability
+### 6. 🚨 Early Warning
+- Disponible para targets de regresión con especificaciones en `config/quality_specs.json`.
+- Usa residuos de calibración para calcular P(DZ) y P(OOS) por batch.
+- Muestra alertas, métricas de clasificación, análisis de umbrales y distribución de riesgo.
+
+### 7. 🧠 Explainability
 - Abre artefactos explicativos del reporte MLJAR.
 - Calcula permutation importance sobre el mejor AutoML por target.
 - Permite predicción manual para el target seleccionado.
@@ -77,6 +82,9 @@ artifacts/automl_runs/{run_id}/
     leaderboard.csv
     holdout_metrics.json
     predictions.csv
+    calibration_residuals.csv
+    early_warning_predictions.csv
+    early_warning_metrics.json
     plots/*.html
     mljar/
 ```

@@ -1,0 +1,277 @@
+{
+  "protein_concentration": {
+    "aliases": [
+      "Protein concentration (ug/mL)",
+      "Protein concentration",
+      "protein_concentration_ug_ml"
+    ],
+    "unit": "ug/mL",
+    "spec": {
+      "type": "two_sided",
+      "lower": 70,
+      "upper": 130,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "percent_of_spec_width",
+      "total_fraction": 0.10
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 20
+    }
+  },
+  "polysaccharide_concentration": {
+    "aliases": [
+      "Polysaccharide concentration (ug/mL)",
+      "Polysaccharide concentration",
+      "polysaccharide_concentration_ug_ml"
+    ],
+    "unit": "ug/mL",
+    "spec": {
+      "type": "two_sided",
+      "lower": 70,
+      "upper": 130,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "percent_of_spec_width",
+      "total_fraction": 0.10
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 20
+    }
+  },
+  "protein_adsorption": {
+    "aliases": [
+      "Protein adsorption (%)",
+      "Protein adsorption",
+      "protein_adsorption_percent"
+    ],
+    "unit": "%",
+    "spec": {
+      "type": "lower_only",
+      "lower": 80,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 3
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 10
+    }
+  },
+  "polysaccharide_adsorption": {
+    "aliases": [
+      "Polysaccharide adsorption (%)",
+      "Polysaccharide adsorption",
+      "polysaccharide_adsorption_percent"
+    ],
+    "unit": "%",
+    "spec": {
+      "type": "lower_only",
+      "lower": 80,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 3
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 10
+    }
+  },
+  "ph": {
+    "aliases": [
+      "pH",
+      "ph"
+    ],
+    "unit": "pH",
+    "spec": {
+      "type": "two_sided",
+      "lower": 6.5,
+      "upper": 7.2,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "percent_of_spec_width",
+      "total_fraction": 0.10
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 0.25
+    }
+  },
+  "thimerosal_concentration": {
+    "aliases": [
+      "Thimerosal concentration (mg/mL)",
+      "Thimerosal concentration",
+      "thimerosal_concentration_mg_ml"
+    ],
+    "unit": "mg/mL",
+    "spec": {
+      "type": "two_sided",
+      "lower": 0.07,
+      "upper": 0.13,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "percent_of_spec_width",
+      "total_fraction": 0.10
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 0.02
+    }
+  },
+  "aloh3_concentration": {
+    "aliases": [
+      "Al(OH)3 concentration (mg/mL)",
+      "Al(OH)3 concentration",
+      "aloh3_concentration_mg_ml"
+    ],
+    "unit": "mg/mL",
+    "spec": {
+      "type": "two_sided",
+      "lower": 3,
+      "upper": 5,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "percent_of_spec_width",
+      "total_fraction": 0.10
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 0.75
+    }
+  },
+  "average_vial_content": {
+    "aliases": [
+      "Average vial content (mL)",
+      "Average vial content",
+      "average_vial_content_ml"
+    ],
+    "unit": "mL",
+    "spec": {
+      "type": "lower_only",
+      "lower": 0.5,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 0.05
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 0.10
+    }
+  },
+  "endotoxin_content": {
+    "aliases": [
+      "Endotoxin content (EU/mL)",
+      "Endotoxin content",
+      "endotoxin_content_eu_ml"
+    ],
+    "unit": "EU/mL",
+    "spec": {
+      "type": "upper_only",
+      "upper": 20000,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 2000
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 5000
+    }
+  },
+  "mouse_antibody_activity": {
+    "aliases": [
+      "Mouse antibody activity",
+      "mouse_antibody_activity"
+    ],
+    "spec": {
+      "type": "lower_only",
+      "lower": 7000,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 700
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 2000
+    }
+  },
+  "bactericidal_activity": {
+    "aliases": [
+      "Bactericidal activity",
+      "bactericidal_activity"
+    ],
+    "spec": {
+      "type": "lower_only",
+      "lower": 4,
+      "inclusive": true
+    },
+    "danger_zone": {
+      "mode": "absolute",
+      "width": 0.5
+    },
+    "alert_thresholds": {
+      "p_dz": 0.10,
+      "p_oos": 0.02
+    },
+    "uncertainty": {
+      "coverage": 0.90,
+      "max_interval_width": 1.5
+    }
+  }
+}

@@ -120,14 +120,16 @@ if invalid_targets or quality["target_issues"]:
 st.divider()
 st.markdown("### ⚙️ Opciones de entrenamiento")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     total_time_limit = st.slider("Tiempo por target", 30, 1800, 180, 30, format="%d s")
 with col2:
     test_size = st.slider("Holdout test size", 0.1, 0.4, 0.2, 0.05)
 with col3:
-    random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1)
+    calibration_size = st.slider("Calibration size", 0.1, 0.4, 0.2, 0.05)
 with col4:
+    random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1)
+with col5:
     mode = st.selectbox("Modo mljar", ["Perform", "Explain", "Compete"], index=0)
 
 with st.expander("Catálogo mljar", expanded=False):
@@ -148,6 +150,12 @@ def _target_manifest(result: dict) -> dict:
         "leaderboard_path",
         "predictions_path",
         "metrics_path",
+        "calibration_rows",
+        "calibration_residuals_path",
+        "early_warning_predictions_path",
+        "early_warning_metrics_path",
+        "early_warning_error",
+        "quality_spec_key",
         "plot_paths",
         "best_model_name",
         "best_model_type",
@@ -174,6 +182,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
                 all_targets=targets,
                 run_path=run_path,
                 test_size=float(test_size),
+                calibration_size=float(calibration_size),
                 total_time_limit=int(total_time_limit),
                 mode=mode,
                 random_state=int(random_state),
@@ -206,6 +215,7 @@ if st.button("🚀 Entrenar AutoML por target", use_container_width=True):
         "settings": {
             "total_time_limit": int(total_time_limit),
             "test_size": float(test_size),
+            "calibration_size": float(calibration_size),
             "random_state": int(random_state),
             "mode": mode,
             "algorithms": FULL_MLJAR_ALGORITHMS,
