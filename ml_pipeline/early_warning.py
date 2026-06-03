@@ -429,6 +429,97 @@ def threshold_analysis(
     return pd.DataFrame(rows)
 
 
+def recompute_early_warning_for_target(
+    y_true: Any,
+    y_pred: Any,
+    config: dict[str, Any],
+    *,
+    residuals: Any | None = None,
+    row_index: Any | None = None,
+    target: str | None = None,
+) -> dict[str, Any]:
+    """Recalcula Early Warning desde datos de holdout existentes, sin reentrenar.
+
+    Usa residuos de calibracion si estan disponibles; si no, calcula
+    residuos del holdout (y_true - y_pred) como aproximacion. Esto
+    permite re-evaluar las alertas con especificaciones actualizadas
+    sin necesidad de reentrenar el modelo.
+
+    Parameters
+    ----------
+    y_true : array-like
+        Valores reales del conjunto de prueba.
+    y_pred : array-like
+        Predicciones del modelo sobre el conjunto de prueba.
+    config : dict
+        Especificacion de calidad resuelta desde quality_specs.json.
+    residuals : array-like, optional
+        Residuos de calibracion (y_true_calib - y_pred_calib).
+    row_index : array-like, optional
+        Indices de fila originales.
+    target : str, optional
+        Nombre del target.
+
+    Returns
+    -------
+    dict with keys:
+        predictions : pd.DataFrame
+        metrics : dict
+        residuals : np.ndarray
+        used_fallback_residuals : bool
+        warnings : list[str]
+    """
+    y_true_arr = np.asarray(y_true, dtype=float).ravel()
+    y_pred_arr = np.asarray(y_pred, dtype=float).ravel()
+    if y_true_arr.shape != y_pred_arr.shape:
+        raise ValueError("y_true e y_pred deben tener la misma longitud.")
+
+    warnings_list: list[str] = []
+    used_fallback = False
+    residual_arr = None
+
+    if residuals is not None:
+        residual_arr = np.asarray(residuals, dtype=float).ravel()
+        residual_arr = residual_arr[np.isfinite(residual_arr)]
+        if residual_arr.size == 0:
+            residual_arr = None
+
+    if residual_arr is None:
+        residual_arr = fit_residual_uncertainty(y_true_arr, y_pred_arr)
+        used_fallback = True
+        warnings_list.append(
+            "No se encontraron residuos de calibracion. "
+            "Usando residuos del conjunto de prueba como aproximacion. "
+            "Las probabilidades pueden diferir ligeramente de una calibracion dedicada."
+        )
+
+    predictions = compute_early_warning_predictions(
+        y_true_arr,
+        y_pred_arr,
+        residual_arr,
+        config,
+        row_index=row_index,
+        target=target,
+    )
+
+    metrics = compute_early_warning_metrics(predictions)
+    metrics.update(
+        {
+            "calibration_rows": 0 if used_fallback else int(len(residual_arr)),
+            "residual_count": int(len(residual_arr)),
+            "used_fallback_residuals": used_fallback,
+        }
+    )
+
+    return {
+        "predictions": predictions,
+        "metrics": metrics,
+        "residuals": residual_arr,
+        "used_fallback_residuals": used_fallback,
+        "warnings": warnings_list,
+    }
+
+
 def spec_description(config: dict[str, Any]) -> str:
     spec = config.get("spec") or {}
     spec_type = _spec_type(spec)

@@ -1,12 +1,17 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ml_pipeline.artifacts import save_dataframe, save_json, target_dir as _target_dir
 from ml_pipeline.early_warning import (
     alert_thresholds,
     build_danger_zone_intervals,
+    compute_alert_metrics,
     load_quality_specs,
+    recompute_early_warning_for_target,
     resolve_quality_spec,
     spec_description,
     threshold_analysis,
@@ -127,15 +132,120 @@ target_options = ["All regression targets", *regression_targets]
 selected_target = st.selectbox("Target", target_options)
 
 if selected_target == "All regression targets":
-    ready = summary.loc[summary["Status"] == "Ready"]
+    ready = summary.loc[summary["Status"].isin(["Ready", "Legacy run"])]
     if ready.empty:
         st.info("No hay artefactos Early Warning listos. Reentrena con calibracion y especificaciones configuradas.")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Targets ready", f"{len(ready):,}")
-        c2.metric("Total alerts", f"{int(ready['Alerts'].sum()):,}")
-        c3.metric("Total events", f"{int(ready['Events'].sum()):,}")
-        c4.metric("False negatives", f"{int(ready['FN'].sum()):,}")
+        st.stop()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Targets available", f"{len(ready):,}")
+    c2.metric("Total alerts", f"{int(ready['Alerts'].sum()):,}")
+    c3.metric("Total events", f"{int(ready['Events'].sum()):,}")
+    c4.metric("False negatives", f"{int(ready['FN'].sum()):,}")
+    legacy = summary.loc[summary["Status"] == "Legacy run"]
+    if not legacy.empty:
+        st.info(
+            f"{len(legacy)} target(s) en estado 'Legacy run'. "
+            "Seleccionalos individualmente y presiona **Recalcular Early Warning** para generar las predicciones."
+        )
+
+    # --- Aggregated confusion matrices ---
+    st.markdown("---")
+    st.markdown("### Matrices de Confusion Agregadas")
+
+    all_alerts = []
+    all_actual_events = []
+    all_dz_alerts = []
+    all_actual_in_dz = []
+    all_oos_alerts = []
+    all_actual_oos = []
+
+    for target_name in regression_targets:
+        target_res = target_results.get(target_name)
+        if target_res is None:
+            continue
+        preds = target_res.get("early_warning_predictions")
+        if preds is None or preds.empty:
+            continue
+        status_str, target_spec, _ = _early_warning_status(target_res, target_name, specs)
+        if status_str not in ("Ready", "Legacy run"):
+            continue
+        if target_spec is None:
+            continue
+        try:
+            target_thresholds = alert_thresholds(target_spec)
+        except Exception:
+            continue
+
+        p_dz_threshold = target_thresholds["p_dz"]
+        p_oos_threshold = target_thresholds["p_oos"]
+
+        if "alert" in preds.columns and "actual_event" in preds.columns:
+            all_alerts.append(preds["alert"].astype(bool))
+            all_actual_events.append(preds["actual_event"].astype(bool))
+
+        if "p_dz" in preds.columns and "actual_in_dz" in preds.columns:
+            all_dz_alerts.append(preds["p_dz"] >= p_dz_threshold)
+            all_actual_in_dz.append(preds["actual_in_dz"].astype(bool))
+
+        if "p_oos" in preds.columns and "actual_oos" in preds.columns:
+            all_oos_alerts.append(preds["p_oos"] >= p_oos_threshold)
+            all_actual_oos.append(preds["actual_oos"].astype(bool))
+
+    if not all_alerts and not all_dz_alerts and not all_oos_alerts:
+        st.info("No hay predicciones disponibles para generar matrices de confusion agregadas.")
+        st.stop()
+
+    cm_col1, cm_col2, cm_col3 = st.columns(3)
+
+    with cm_col1:
+        if all_alerts:
+            combined_alerts = pd.concat(all_alerts, ignore_index=True)
+            combined_events = pd.concat(all_actual_events, ignore_index=True)
+            general_metrics = compute_alert_metrics(
+                combined_events.to_numpy(),
+                combined_alerts.to_numpy(),
+                None,
+            )
+            _show_confusion_matrix(
+                general_metrics,
+                "Alertas Generales (alert vs actual_event)",
+            )
+        else:
+            st.info("Sin datos para alertas generales.")
+
+    with cm_col2:
+        if all_dz_alerts:
+            combined_dz_alert = pd.concat(all_dz_alerts, ignore_index=True)
+            combined_dz_event = pd.concat(all_actual_in_dz, ignore_index=True)
+            dz_metrics = compute_alert_metrics(
+                combined_dz_event.to_numpy(),
+                combined_dz_alert.to_numpy(),
+                None,
+            )
+            _show_confusion_matrix(
+                dz_metrics,
+                "Zona de Peligro (p_dz ≥ threshold vs actual_in_dz)",
+            )
+        else:
+            st.info("Sin datos para zona de peligro.")
+
+    with cm_col3:
+        if all_oos_alerts:
+            combined_oos_alert = pd.concat(all_oos_alerts, ignore_index=True)
+            combined_oos_event = pd.concat(all_actual_oos, ignore_index=True)
+            oos_metrics = compute_alert_metrics(
+                combined_oos_event.to_numpy(),
+                combined_oos_alert.to_numpy(),
+                None,
+            )
+            _show_confusion_matrix(
+                oos_metrics,
+                "OOS (p_oos ≥ threshold vs actual_oos)",
+            )
+        else:
+            st.info("Sin datos para OOS.")
+
     st.stop()
 
 result = target_results[selected_target]
@@ -166,11 +276,98 @@ if status == "Error":
     st.error(f"No se pudieron generar los artefactos Early Warning: {result.get('early_warning_error')}")
     st.stop()
 
-if predictions.empty:
-    st.info(
-        "Esta corrida no tiene residuos de calibracion ni predicciones Early Warning. "
-        "Reentrena el target para generar `calibration_residuals.csv` y `early_warning_predictions.csv`."
+needs_recompute = predictions.empty
+
+if needs_recompute:
+    st.warning(
+        "Esta corrida no tiene predicciones Early Warning. "
+        "Puedes recalcularlas sin reentrenar usando las especificaciones actuales de `quality_specs.json` "
+        "y los datos de holdout ya guardados."
     )
+
+st.markdown("---")
+recalc_col1, recalc_col2 = st.columns([2, 1])
+with recalc_col1:
+    if needs_recompute:
+        st.caption("💡 Cambia `quality_specs.json` y presiona **Recalcular** para evaluar con nuevos limites, danger zones y thresholds.")
+    else:
+        st.caption("💡 Cambia `quality_specs.json` y presiona **Recalcular** para re-evaluar las alertas con los nuevos parametros sin reentrenar el modelo.")
+with recalc_col2:
+    do_recompute = st.button(
+        "🔄 Recalcular Early Warning",
+        use_container_width=True,
+        type="primary",
+    )
+
+if do_recompute:
+    pred_frame = result.get("prediction_frame")
+    if pred_frame is None or pred_frame.empty or "y_true" not in pred_frame or "y_pred" not in pred_frame:
+        st.error("No se encontraron predicciones de holdout (`predictions.csv`). Reentrena el target.")
+        st.stop()
+
+    y_true = pred_frame["y_true"].to_numpy()
+    y_pred = pred_frame["y_pred"].to_numpy()
+    row_index = pred_frame["row_index"].to_numpy() if "row_index" in pred_frame.columns else None
+
+    calibration_residuals = result.get("calibration_residuals")
+    if calibration_residuals is None:
+        calib_frame = result.get("calibration_residuals_frame")
+        if calib_frame is not None and not calib_frame.empty and "residual" in calib_frame:
+            calibration_residuals = calib_frame["residual"].to_numpy()
+
+    with st.spinner("Recalculando Early Warning con las especificaciones actuales..."):
+        try:
+            ew_result = recompute_early_warning_for_target(
+                y_true=y_true,
+                y_pred=y_pred,
+                config=spec,
+                residuals=calibration_residuals,
+                row_index=row_index,
+                target=selected_target,
+            )
+        except Exception as exc:
+            st.error(f"Error al recalcular: {exc}")
+            st.stop()
+
+    predictions = ew_result["predictions"]
+    metrics = ew_result["metrics"]
+    residuals_arr = ew_result.get("residuals")
+
+    run_path = Path(run.get("base_path", ""))
+    if run_path.exists():
+        t_dir = _target_dir(run_path, selected_target)
+        residual_df = pd.DataFrame(
+            {
+                "row_index": row_index if row_index is not None else range(len(y_true)),
+                "target": selected_target,
+                "y_true": y_true,
+                "y_pred": y_pred,
+                "residual": y_true - y_pred if residuals_arr is None else residuals_arr[:len(y_true)],
+            }
+        )
+        calib_path = save_dataframe(t_dir / "calibration_residuals.csv", residual_df)
+        pred_path = save_dataframe(t_dir / "early_warning_predictions.csv", predictions)
+        metrics_path = save_json(t_dir / "early_warning_metrics.json", metrics)
+        result["calibration_residuals_path"] = str(calib_path)
+        result["early_warning_predictions_path"] = str(pred_path)
+        result["early_warning_metrics_path"] = str(metrics_path)
+
+    result["calibration_residuals"] = residuals_arr
+    result["early_warning_predictions"] = predictions
+    result["early_warning_metrics"] = metrics
+    result["early_warning_error"] = None
+    if "quality_spec_key" not in result:
+        result["quality_spec_key"] = selected_target
+
+    if ew_result.get("warnings"):
+        for warning_msg in ew_result["warnings"]:
+            st.warning(warning_msg)
+
+    st.success("Early Warning recalculado exitosamente. Recargando...")
+    st.rerun()
+
+if predictions.empty:
+    st.info("Presiona **Recalcular Early Warning** para generar las predicciones con los specs actuales.")
     st.stop()
 
 c1, c2, c3, c4, c5 = st.columns(5)
