@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import json
+
 from ml_pipeline.artifacts import save_dataframe, save_json, target_dir as _target_dir
 from ml_pipeline.early_warning import (
     alert_thresholds,
@@ -16,6 +18,7 @@ from ml_pipeline.early_warning import (
     spec_description,
     threshold_analysis,
 )
+from ml_pipeline.early_warning_report import generate_early_warning_report
 
 
 DARK = dict(
@@ -142,6 +145,21 @@ if selected_target == "All regression targets":
     c2.metric("Total alerts", f"{int(ready['Alerts'].sum()):,}")
     c3.metric("Total events", f"{int(ready['Events'].sum()):,}")
     c4.metric("False negatives", f"{int(ready['FN'].sum()):,}")
+
+    # --- Export report button ---
+    if not ready.empty:
+        report_data = generate_early_warning_report(
+            target_results, specs, run.get("base_path", "")
+        )
+        report_json = json.dumps(report_data, indent=2, ensure_ascii=False)
+        st.download_button(
+            label="📥 Descargar reporte Early Warning (JSON)",
+            data=report_json,
+            file_name="early_warning_report.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
     legacy = summary.loc[summary["Status"] == "Legacy run"]
     if not legacy.empty:
         st.info(
@@ -458,6 +476,22 @@ with tab4:
     st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
+
+# --- Global export button (always available when there is data) ---
+ready_global = summary.loc[summary["Status"].isin(["Ready", "Legacy run"])]
+if not ready_global.empty:
+    report_data_global = generate_early_warning_report(
+        target_results, specs, run.get("base_path", "")
+    )
+    report_json_global = json.dumps(report_data_global, indent=2, ensure_ascii=False)
+    st.download_button(
+        label="📥 Descargar reporte completo Early Warning (JSON)",
+        data=report_json_global,
+        file_name="early_warning_report.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
 with st.expander("Early Warning artifacts", expanded=False):
     rows = [
         {"Artifact": "quality_specs", "Path": "config/quality_specs.json"},
