@@ -56,7 +56,7 @@ def infer_target_task(series: pd.Series) -> dict:
         return TargetTask(
             task="classification",
             ml_task="binary_classification",
-            primary_metric="f1",
+            primary_metric="recall",
             direction="max",
             reason="Tiene exactamente 2 clases distintas.",
         ).to_dict()
@@ -70,7 +70,7 @@ def infer_target_task(series: pd.Series) -> dict:
         return TargetTask(
             task="classification",
             ml_task="multiclass_classification",
-            primary_metric="f1",
+            primary_metric="recall",
             direction="max",
             reason="Es una variable categórica con más de 2 clases.",
         ).to_dict()
@@ -80,7 +80,7 @@ def infer_target_task(series: pd.Series) -> dict:
             return TargetTask(
                 task="classification",
                 ml_task="multiclass_classification",
-                primary_metric="f1",
+                primary_metric="recall",
                 direction="max",
                 reason=(
                     f"Es numérica discreta con {unique_count} valores únicos "
@@ -105,7 +105,7 @@ def normalize_target_config(config: dict) -> dict:
         return {
             **config,
             "task": "classification",
-            "primary_metric": "f1",
+            "primary_metric": "recall",
             "direction": "max",
         }
     if ml_task == "regression":

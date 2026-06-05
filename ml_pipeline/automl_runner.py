@@ -370,9 +370,11 @@ def _collect_model_metrics(
         "smape",
         "accuracy",
         "f1",
+        "f3",
         "precision",
         "recall",
         "roc_auc",
+        "pr_auc",
         "roc_auc_ovr",
     ]
     ordered_columns = [

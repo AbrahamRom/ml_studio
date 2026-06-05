@@ -6,9 +6,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     classification_report,
     confusion_matrix,
     f1_score,
+    fbeta_score,
     mean_absolute_error,
     mean_squared_error,
     precision_score,
@@ -86,11 +88,15 @@ def classification_metrics(y_true, y_pred, proba=None, proba_classes=None) -> di
     labels = pd.unique(
         pd.concat([pd.Series(y_true), pd.Series(y_pred)], ignore_index=True).dropna()
     ).tolist()
+    recall_val = float(recall_score(y_true, y_pred, average="weighted", zero_division=0))
+    precision_val = float(precision_score(y_true, y_pred, average="weighted", zero_division=0))
+    f3_val = float(fbeta_score(y_true, y_pred, beta=3, average="weighted", zero_division=0))
     metrics = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "f1": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
-        "precision": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "f3": f3_val,
+        "precision": precision_val,
+        "recall": recall_val,
         "classes": labels,
         "classification_report": classification_report(
             y_true, y_pred, output_dict=True, zero_division=0
@@ -113,8 +119,10 @@ def classification_metrics(y_true, y_pred, proba=None, proba_classes=None) -> di
                     positive_idx = classes.index(positive_label)
                     y_true_binary = (np.asarray(y_true) == positive_label).astype(int)
                     metrics["roc_auc"] = float(roc_auc_score(y_true_binary, proba_arr[:, positive_idx]))
+                    metrics["pr_auc"] = float(average_precision_score(y_true_binary, proba_arr[:, positive_idx]))
                 else:
                     metrics["roc_auc"] = float(roc_auc_score(y_true, proba_arr[:, 1]))
+                    metrics["pr_auc"] = float(average_precision_score(y_true, proba_arr[:, 1]))
             elif len(labels) > 2 and proba_arr.ndim == 2 and proba_arr.shape[1] == len(labels):
                 if classes and len(classes) == proba_arr.shape[1]:
                     metrics["roc_auc_ovr"] = float(
@@ -132,6 +140,30 @@ def classification_metrics(y_true, y_pred, proba=None, proba_classes=None) -> di
                     )
         except Exception:
             pass
+
+    # score_global compuesto para clasificación (ponderado favoreciendo recall y f3)
+    component_scores = {}
+    weights = {}
+    if recall_val is not None and np.isfinite(recall_val):
+        component_scores["recall"] = recall_val
+        weights["recall"] = 0.40
+    if f3_val is not None and np.isfinite(f3_val):
+        component_scores["f3"] = f3_val
+        weights["f3"] = 0.30
+    if precision_val is not None and np.isfinite(precision_val):
+        component_scores["precision"] = precision_val
+        weights["precision"] = 0.15
+    pr_auc = metrics.get("pr_auc")
+    if pr_auc is not None and np.isfinite(pr_auc):
+        component_scores["pr_auc"] = pr_auc
+        weights["pr_auc"] = 0.15
+
+    total_weight = sum(weights.get(name, 0) for name in component_scores)
+    if total_weight > 0:
+        metrics["score_global"] = float(
+            sum(weights[name] * score for name, score in component_scores.items()) / total_weight
+        )
+
     return metrics
 
 

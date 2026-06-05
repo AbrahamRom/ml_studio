@@ -5,6 +5,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from ml_pipeline.quality import (
+    compute_variable_stats,
+    variable_stats_to_csv,
+    variable_stats_to_json,
+)
+
 DARK = dict(
     paper_bgcolor="#0d0f14",
     plot_bgcolor="#141720",
@@ -20,14 +26,16 @@ if st.session_state.df is None:
 df = st.session_state.df
 targets = st.session_state.target_cols or []
 
-tab1, tab2, tab3, tab4 = st.tabs(["📋 Resumen", "📈 Distribuciones", "🔗 Correlaciones", "❗ Calidad"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["📋 Resumen", "📈 Distribuciones", "🔗 Correlaciones", "❗ Calidad", "📐 Estadísticas"]
+)
 
 # ── TAB 1: Resumen ─────────────────────────────────────────────────────────────
 with tab1:
     st.markdown("### Tipos de columnas")
     type_map = {}
     for c in df.columns:
-        if df[c].dtype == object or str(df[c].dtype) == "category":
+        if df[c].dtype == object or str(df[c].dtype) == "category" or pd.api.types.is_string_dtype(df[c]):
             type_map[c] = "categorical"
         elif df[c].nunique() <= 15 and df[c].dtype in [np.int64, np.int32, int]:
             type_map[c] = "discrete"
@@ -150,3 +158,136 @@ with tab4:
     fig3 = px.box(df, y=col_box, color_discrete_sequence=["#5b6af0"])
     fig3.update_layout(**DARK, height=320)
     st.plotly_chart(fig3, use_container_width=True)
+
+# ── TAB 5: Estadísticas (min, max, mediana, media, varianza, Shapiro-Wilk) ───
+with tab5:
+    st.markdown("### Estadísticas detalladas por variable")
+    st.caption(
+        "Para cada columna del dataset se calculan mínimo, máximo, media, mediana, "
+        "varianza y el test de normalidad **Shapiro-Wilk** (α = 0.05). "
+        "Las variables categóricas no aplican al test de normalidad."
+    )
+
+    ctrl_a, ctrl_b, ctrl_c = st.columns([1, 1, 2])
+    with ctrl_a:
+        only_numeric = st.toggle(
+            "Solo variables numéricas",
+            value=False,
+            help="Si está activo, excluye las columnas categóricas/discretas-int del resumen.",
+        )
+    with ctrl_b:
+        alpha = st.select_slider(
+            "Nivel de significancia (α)",
+            options=[0.01, 0.025, 0.05, 0.10],
+            value=0.05,
+            help="Umbral del p-valor para declarar la distribución como normal.",
+        )
+
+    # Cache the heavy computation per dataset identity to avoid recomputing
+    # Shapiro-Wilk on every widget interaction. The cache key includes α so the
+    # decision column updates when the slider changes.
+    @st.cache_data(show_spinner="Calculando estadísticas por variable…")
+    def _cached_variable_stats(df_id: int, df_hash: str, _df: pd.DataFrame, alpha_: float):
+        return compute_variable_stats(_df, targets, alpha=alpha_)
+
+    df_id = id(df)
+    df_hash = pd.util.hash_pandas_object(df, index=True).sum().__int__()
+    stats = _cached_variable_stats(df_id, df_hash, df, float(alpha))
+
+    wide: pd.DataFrame = stats["wide"].copy()
+
+    if only_numeric:
+        wide = wide[wide["class"].isin(["continuous", "discrete"])].reset_index(drop=True)
+
+    # Format the decision column with an emoji + label for readability in the UI.
+    def _fmt_norm(value):
+        if value is True:
+            return "✅ Normal"
+        if value is False:
+            return "❌ No normal"
+        return "⚠️ N/A"
+
+    display = wide.rename(
+        columns={
+            "column": "Columna",
+            "class": "Tipo",
+            "count": "n",
+            "null_pct": "% Nulos",
+            "min": "Mínimo",
+            "max": "Máximo",
+            "mean": "Media",
+            "median": "Mediana",
+            "variance": "Varianza",
+            "std": "Desv. estándar",
+            "shapiro_W": "Shapiro W",
+            "shapiro_p": "Shapiro p-valor",
+            "shapiro_is_normal": "¿Normal?",
+            "shapiro_n_used": "n (Shapiro)",
+        }
+    )
+    if "¿Normal?" in display.columns:
+        display["¿Normal?"] = display["¿Normal?"].map(_fmt_norm)
+
+    # Pretty numeric formatting (3 decimals, leave ints alone).
+    for col_name in ["Mínimo", "Máximo", "Media", "Mediana", "Varianza",
+                     "Desv. estándar", "Shapiro W", "Shapiro p-valor", "% Nulos"]:
+        if col_name in display.columns:
+            display[col_name] = display[col_name].apply(
+                lambda v: (f"{v:.4f}" if pd.notnull(v) and isinstance(v, float) else v)
+            )
+    if "n" in display.columns:
+        display["n"] = display["n"].astype("Int64")
+    if "n (Shapiro)" in display.columns:
+        display["n (Shapiro)"] = display["n (Shapiro)"].astype("Int64")
+
+    st.dataframe(display, use_container_width=True, height=420)
+
+    # ── Notas sobre el test de Shapiro-Wilk ───────────────────────────────────
+    notes = [r for r in stats["columns"] if r.get("shapiro_note")]
+    if notes:
+        with st.expander("📝 Notas del test de Shapiro-Wilk"):
+            for r in notes:
+                st.markdown(
+                    f"- **{r['column']}** ({r['class']}, n={r.get('shapiro_n_used')}): "
+                    f"{r['shapiro_note']}"
+                )
+
+    # ── Descargas estructuradas (CSV / JSON) ──────────────────────────────────
+    st.markdown("#### Descargar resumen")
+    csv_bytes = variable_stats_to_csv(stats)
+    json_bytes = variable_stats_to_json(stats)
+
+    dl1, dl2 = st.columns(2)
+    with dl1:
+        st.download_button(
+            label="⬇️ Descargar CSV (formato ancho)",
+            data=csv_bytes,
+            file_name="variable_stats.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with dl2:
+        st.download_button(
+            label="⬇️ Descargar JSON (completo)",
+            data=json_bytes,
+            file_name="variable_stats.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+    with st.expander("ℹ️ Detalles de las métricas"):
+        st.markdown(
+            """
+            - **Mínimo / Máximo** — valores extremos observados (sin nulos).
+            - **Media** — promedio aritmético.
+            - **Mediana** — percentil 50, robusta a outliers.
+            - **Varianza** — medida de dispersión al cuadrado (`var(ddof=1)`).
+            - **Shapiro-Wilk** — test de hipótesis de normalidad. Hipótesis nula
+              H₀: la muestra proviene de una distribución normal. Se considera
+              "normal" cuando `p > α`. SciPy limita el test a 5000 observaciones;
+              si el dataset supera ese tamaño se aplica submuestreo reproducible
+              (`random_state=42`).
+            - **Variables categóricas** — el test de Shapiro-Wilk no aplica, se
+              reportan `moda` (top) y su frecuencia.
+            """
+        )
