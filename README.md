@@ -34,6 +34,11 @@ streamlit run app.py
 
 ### 2. 🔍 EDA & Calidad
 - Resumen de tipos, nulos, duplicados, distribuciones, correlaciones y outliers.
+- Pestaña **📐 Estadísticas** con análisis detallado por variable:
+  - **Mínimo, máximo, media, mediana, varianza** y **test de Shapiro-Wilk** (α = 0.05).
+  - Sub-muestreo reproducible a 5000 observaciones si el dataset supera el límite de SciPy.
+  - Selector de α y filtro *solo numéricas*.
+  - Descarga del resumen en **CSV** (formato ancho) y **JSON** (completo) desde la propia pestaña.
 - El entrenamiento guarda un `quality_report.json` por corrida.
 
 ### 3. 🏋️ Entrenar

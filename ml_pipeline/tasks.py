@@ -70,7 +70,7 @@ def infer_target_task(series: pd.Series) -> dict:
         return TargetTask(
             task="classification",
             ml_task="multiclass_classification",
-            primary_metric="recall",
+            primary_metric="accuracy",
             direction="max",
             reason="Es una variable categórica con más de 2 clases.",
         ).to_dict()
@@ -80,7 +80,7 @@ def infer_target_task(series: pd.Series) -> dict:
             return TargetTask(
                 task="classification",
                 ml_task="multiclass_classification",
-                primary_metric="recall",
+                primary_metric="accuracy",
                 direction="max",
                 reason=(
                     f"Es numérica discreta con {unique_count} valores únicos "
@@ -101,11 +101,18 @@ def normalize_target_config(config: dict) -> dict:
     """Fill required task metadata after a manual override."""
 
     ml_task = config.get("ml_task")
-    if ml_task in {"binary_classification", "multiclass_classification"}:
+    if ml_task == "binary_classification":
         return {
             **config,
             "task": "classification",
             "primary_metric": "recall",
+            "direction": "max",
+        }
+    if ml_task == "multiclass_classification":
+        return {
+            **config,
+            "task": "classification",
+            "primary_metric": "accuracy",
             "direction": "max",
         }
     if ml_task == "regression":
@@ -121,13 +128,15 @@ def normalize_target_config(config: dict) -> dict:
 def resolve_mljar_metric(config: dict) -> str:
     """Return a metric name that mljar-supervised supports.
     
-    mljar does NOT support 'recall' for classification. We use 'f1' instead, which
-    is the closest supported metric. The primary_metric field is kept as 'recall'
-    for holdout model selection and reporting (computed externally via sklearn).
+    mljar does NOT support 'recall' for binary_classification. We use 'f1' instead,
+    which is the closest supported metric. For multiclass, mljar supports 'accuracy'
+    directly, which matches our primary_metric.
     """
     ml_task = config.get("ml_task", "")
-    if ml_task in {"binary_classification", "multiclass_classification"}:
+    if ml_task == "binary_classification":
         return "f1"
+    if ml_task == "multiclass_classification":
+        return "accuracy"
     return config.get("primary_metric", "rmse")
 
 
