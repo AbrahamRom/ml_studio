@@ -8,6 +8,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+import joblib
 import pandas as pd
 
 from .early_warning import load_quality_specs, resolve_quality_spec
@@ -215,14 +216,27 @@ def load_target_artifacts(
     proba = prediction_frame[proba_cols].to_numpy() if proba_cols else None
     _, quality_spec = resolve_quality_spec(target, load_quality_specs())
 
+    # Try to reload automl model and X_test from disk if they exist
+    automl_model_path = Path(result.get("automl_model_path") or target_path / "automl_model.joblib")
+    X_test_path = Path(result.get("X_test_path") or target_path / "X_test.csv")
+    automl = None
+    X_test = None
+    if automl_model_path.exists():
+        try:
+            automl = joblib.load(str(automl_model_path))
+        except Exception:
+            pass
+    if X_test_path.exists():
+        X_test = read_dataframe(X_test_path)
+
     return {
         **result,
-        "automl": None,
+        "automl": automl,
         "leaderboard": leaderboard,
         "per_model_metrics": per_model_metrics,
         "holdout_metrics": holdout_metrics,
         "X_train": None,
-        "X_test": None,
+        "X_test": X_test,
         "y_train": None,
         "y_test": y_test,
         "predictions": predictions,

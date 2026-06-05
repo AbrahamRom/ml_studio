@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import warnings
@@ -21,7 +22,7 @@ from .early_warning import (
 )
 from .metrics import compute_holdout_metrics
 from .plots import save_evaluation_plots
-from .tasks import normalize_target_config
+from .tasks import normalize_target_config, resolve_mljar_metric
 
 
 os.environ.setdefault("XDG_CACHE_HOME", "/tmp/ml_studio_cache")
@@ -456,7 +457,7 @@ def run_target_automl(
         algorithms=algorithms or FULL_MLJAR_ALGORITHMS,
         train_ensemble=True,
         stack_models="auto",
-        eval_metric=config["primary_metric"],
+        eval_metric=resolve_mljar_metric(config),
         validation_strategy="auto",
         explain_level="auto",
         random_state=random_state,
@@ -609,6 +610,12 @@ def run_target_automl(
     metrics_path = save_json(t_dir / "holdout_metrics.json", holdout_metrics)
     plot_paths = save_evaluation_plots(config["task"], plots_path, target, y_test, y_pred, proba)
 
+    # Save automl model and X_test for later reload
+    automl_model_path = str(t_dir / "automl_model.joblib")
+    X_test_path = str(t_dir / "X_test.csv")
+    joblib.dump(automl, automl_model_path)
+    save_dataframe(t_dir / "X_test.csv", X_test)
+
     target_manifest = {
         "target": target,
         "config": config,
@@ -634,6 +641,9 @@ def run_target_automl(
         "internal_best_model_name": best_row.get("name"),
         "internal_best_model_type": best_row.get("model_type"),
         "internal_best_metric_value": best_row.get("metric_value"),
+        ### EXTRA ###
+        "automl_model_path": automl_model_path,
+        "X_test_path": X_test_path,
     }
     save_json(t_dir / "target_manifest.json", target_manifest)
 

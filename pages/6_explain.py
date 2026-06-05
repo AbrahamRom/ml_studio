@@ -70,7 +70,7 @@ with tab2:
     n_repeats = st.slider("Repeticiones", 3, max_repeats, 8)
     scoring = "neg_root_mean_squared_error" if config["task"] == "regression" else "f1_weighted"
     if not has_model:
-        st.info("La corrida se cargó desde disco; esta sección requiere el modelo en memoria.")
+        st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
     else:
         if st.button("⚙️ Calcular importancia", use_container_width=True):
             with st.spinner("Calculando permutation importance..."):
@@ -150,7 +150,7 @@ with tab4:
     st.caption("Completa las primeras features editables; el resto se rellena con mediana o moda del holdout.")
 
     if not has_model:
-        st.info("La corrida se cargó desde disco; esta sección requiere el modelo en memoria.")
+        st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
     else:
         editable_features = feature_cols[: min(12, len(feature_cols))]
         input_values = {}

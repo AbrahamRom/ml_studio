@@ -118,6 +118,19 @@ def normalize_target_config(config: dict) -> dict:
     return config
 
 
+def resolve_mljar_metric(config: dict) -> str:
+    """Return a metric name that mljar-supervised supports.
+    
+    mljar does NOT support 'recall' for classification. We use 'f1' instead, which
+    is the closest supported metric. The primary_metric field is kept as 'recall'
+    for holdout model selection and reporting (computed externally via sklearn).
+    """
+    ml_task = config.get("ml_task", "")
+    if ml_task in {"binary_classification", "multiclass_classification"}:
+        return "f1"
+    return config.get("primary_metric", "rmse")
+
+
 def task_label(ml_task: str) -> str:
     labels = {
         "binary_classification": "Clasificación binaria",
