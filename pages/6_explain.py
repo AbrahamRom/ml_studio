@@ -135,7 +135,10 @@ def _predict_with_original_dtypes(model, X_np: np.ndarray, original_df: pd.DataF
         orig_dtype = original_df[col].dtype
         if orig_dtype != X_df[col].dtype:
             try:
-                X_df[col] = X_df[col].astype(orig_dtype)
+                if np.issubdtype(orig_dtype, np.integer):
+                    X_df[col] = X_df[col].round().astype(orig_dtype)
+                else:
+                    X_df[col] = X_df[col].astype(orig_dtype)
             except (ValueError, TypeError):
                 pass  # keep as-is if casting fails
 
@@ -306,16 +309,19 @@ with tab3:
                     def _shap_predict_wrapper(x: np.ndarray):
                         """Restore original dtypes before passing to model.
 
-                        Always return the full predict_proba output (2D) to avoid
-                        shap 0.52.0 internal array construction issues with 1D return
-                        values when combined with numpy 2.x.
+                        shap's internal sampling can produce float values for
+                        integer-coded categorical columns. Round to nearest int
+                        before casting to avoid model rejection.
                         """
                         x_df = pd.DataFrame(x, columns=background.columns)
                         for col in background.columns:
                             orig_dtype = background[col].dtype
                             if orig_dtype != x_df[col].dtype:
                                 try:
-                                    x_df[col] = x_df[col].astype(orig_dtype)
+                                    if np.issubdtype(orig_dtype, np.integer):
+                                        x_df[col] = x_df[col].round().astype(orig_dtype)
+                                    else:
+                                        x_df[col] = x_df[col].astype(orig_dtype)
                                 except (ValueError, TypeError):
                                     pass
                         if is_classification and hasattr(individual_model, "predict_proba"):
@@ -598,13 +604,22 @@ with tab4:
                     instance = X_numeric.iloc[lime_instance_idx].values
 
                     def _lime_predict_wrapper(x: np.ndarray):
-                        """Restore original dtypes before passing to model."""
+                        """Restore original dtypes before passing to model.
+
+                        LIME generates perturbed samples internally as float64 arrays.
+                        For integer-coded categorical columns, round to nearest int
+                        before casting to avoid invalid values (e.g., 5.3 -> 5).
+                        """
                         x_df = pd.DataFrame(x, columns=feature_names)
                         for col in X_numeric.columns:
                             orig_dtype = X_numeric[col].dtype
                             if orig_dtype != x_df[col].dtype:
                                 try:
-                                    x_df[col] = x_df[col].astype(orig_dtype)
+                                    if np.issubdtype(orig_dtype, np.integer):
+                                        # Round float values to nearest int for categorical cols
+                                        x_df[col] = x_df[col].round().astype(orig_dtype)
+                                    else:
+                                        x_df[col] = x_df[col].astype(orig_dtype)
                                 except (ValueError, TypeError):
                                     pass
                         if is_classification:
@@ -616,8 +631,11 @@ with tab4:
                                 return individual_model.predict(x_df)
                             return automl.predict(x_df)
 
+                    lime_kwargs = dict(num_features=15)
+                    if is_classification:
+                        lime_kwargs["top_labels"] = 3
                     exp = explainer.explain_instance(
-                        instance, _lime_predict_wrapper, num_features=15, top_labels=(3 if is_classification else None)
+                        instance, _lime_predict_wrapper, **lime_kwargs
                     )
 
                     if is_classification:
