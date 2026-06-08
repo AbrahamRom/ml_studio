@@ -1156,7 +1156,7 @@ with tab8:
                     z=z,
                     x=list(df.columns),
                     y=list(df.index),
-                    colorscale="Viridis",
+                    colorscale="thermal",
                     text=np.round(text_vals, 4),
                     texttemplate="%{text}",
                     hovertemplate=(

@@ -111,7 +111,7 @@ with tab1:
                         y=_data.index,
                         text=_data.round(4).values,
                         texttemplate="%{text}",
-                        colorscale="Viridis",
+                        colorscale="thermal",
                         hovertemplate="Target: %{y}<br>%{x}: %{text}<extra></extra>",
                     )
                 )
