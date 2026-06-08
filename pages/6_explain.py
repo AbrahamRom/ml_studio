@@ -1103,16 +1103,25 @@ with tab8:
                     st.error(f"Error calculando SHAP global: {exc}")
 
     if shap_global_key in st.session_state:
-        heatmap_df = st.session_state[shap_global_key]
+        raw_df = st.session_state[shap_global_key]
 
         with st.expander("⚙️ Opciones", expanded=False):
+            norm_mode = st.selectbox(
+                "Escala de color",
+                [
+                    "Raw (mean |SHAP|)",
+                    "Normalizado por fila (feature) 0-1",
+                    "Normalizado por columna (target) 0-1",
+                    "Log10(1 + mean |SHAP|)",
+                ],
+            )
             min_val = st.slider(
                 "Importancia mínima (mean |SHAP|)",
-                0.0, float(heatmap_df.values.max()), 0.0,
+                0.0, float(raw_df.values.max()), 0.0,
             )
-            top_k = st.slider("Mostrar top K variables", 5, len(heatmap_df), len(heatmap_df))
+            top_k = st.slider("Mostrar top K variables", 5, len(raw_df), len(raw_df))
 
-        df = heatmap_df.copy()
+        df = raw_df.copy()
         df = df[df.mean(axis=1) >= min_val]
         if len(df) > top_k:
             df = df.loc[df.mean(axis=1).sort_values(ascending=False).index[:top_k]]
@@ -1120,20 +1129,45 @@ with tab8:
         if df.empty:
             st.warning("Sin datos con los filtros actuales.")
         else:
+            # Apply normalization for display
+            if norm_mode == "Normalizado por fila (feature) 0-1":
+                z = (df.values - df.values.min(axis=1, keepdims=True)) / (
+                    df.values.max(axis=1, keepdims=True) - df.values.min(axis=1, keepdims=True) + 1e-12
+                )
+                text_vals = df.values
+                hover_prefix = "Norm"
+            elif norm_mode == "Normalizado por columna (target) 0-1":
+                z = (df.values - df.values.min(axis=0, keepdims=True)) / (
+                    df.values.max(axis=0, keepdims=True) - df.values.min(axis=0, keepdims=True) + 1e-12
+                )
+                text_vals = df.values
+                hover_prefix = "Norm"
+            elif norm_mode == "Log10(1 + mean |SHAP|)":
+                z = np.log10(1 + df.values)
+                text_vals = df.values
+                hover_prefix = "Log10"
+            else:
+                z = df.values
+                text_vals = df.values
+                hover_prefix = "Raw"
+
             fig = go.Figure(
                 data=go.Heatmap(
-                    z=df.values,
+                    z=z,
                     x=list(df.columns),
                     y=list(df.index),
                     colorscale="Viridis",
-                    text=np.round(df.values, 4),
+                    text=np.round(text_vals, 4),
                     texttemplate="%{text}",
-                    hovertemplate="Variable: %{y}<br>Target: %{x}<br>Mean |SHAP|: %{z:.4f}<extra></extra>",
+                    hovertemplate=(
+                        f"Variable: %{{y}}<br>Target: %{{x}}<br>{hover_prefix}: %{{z:.4f}}"
+                        "<extra></extra>"
+                    ),
                 )
             )
             fig.update_layout(
                 **DARK,
-                title="Mean |SHAP| por variable y target",
+                title=f"Mean |SHAP| por variable y target ({norm_mode})",
                 height=max(400, len(df) * 32 + 80),
                 xaxis=dict(tickangle=45, title="Targets"),
                 yaxis=dict(title="Variables de proceso"),
