@@ -405,6 +405,7 @@ def _collect_model_metrics(
         "mape",
         "smape",
         "nrmse",
+        "nmae",
         "accuracy",
         "f1",
         "f3",

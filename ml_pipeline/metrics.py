@@ -73,21 +73,25 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None, spec_range
             sum(weights[name] * score for name, score in present_scores.items()) / total_weight
         )
 
-    # NRMSE = RMSE / spec_range
+    # Normalized error metrics by spec_range
     rmse_val = float(np.sqrt(mse))
+    mae_val = float(mean_absolute_error(y_true, y_pred))
     nrmse = None
+    nmae = None
     if spec_range is not None and spec_range > 0:
         nrmse = float(rmse_val / spec_range)
+        nmae = float(mae_val / spec_range)
 
     return {
         "r2": r2,
         "r2_adjusted": adjusted_r2,
-        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "mae": mae_val,
         "mse": float(mse),
         "rmse": rmse_val,
         "mape": mape,
         "smape": smape,
         "nrmse": nrmse,
+        "nmae": nmae,
         "score_global": global_score,
     }
 
