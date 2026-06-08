@@ -24,6 +24,114 @@ target_results = run["target_results"]
 targets = list(target_results.keys())
 
 target = st.selectbox("Target a evaluar", targets)
+
+with st.expander("🌍 Global Normalized Observed vs Predicted", expanded=False):
+    norm_dfs = []
+    for tgt, res in target_results.items():
+        cfg = res.get("config", {})
+        if cfg.get("task") != "regression":
+            continue
+
+        y_t = res.get("y_test")
+        y_p = res.get("predictions")
+        if y_t is None or y_p is None:
+            continue
+
+        qs = res.get("quality_spec")
+        if qs is None:
+            continue
+
+        spec = qs.get("spec", {})
+        stype = spec.get("type", "two_sided")
+
+        if stype == "two_sided":
+            lower = spec.get("lower")
+            upper = spec.get("upper")
+            if lower is None or upper is None or upper <= lower:
+                continue
+            lsl, usl = float(lower), float(upper)
+
+        elif stype == "upper_only":
+            upper = spec.get("upper")
+            if upper is None or float(upper) <= 0:
+                continue
+            lsl, usl = 0.0, float(upper)
+
+        elif stype == "lower_only":
+            lower = spec.get("lower")
+            if lower is None or float(lower) <= 0:
+                continue
+            lsl = float(lower)
+            unit = qs.get("unit", "")
+            tgt_lower = tgt.lower()
+            if unit == "%" or "percent" in tgt_lower:
+                usl = 100.0
+            else:
+                usl = 2.0 * lsl
+
+        else:
+            continue
+
+        y_t_a = np.asarray(y_t, dtype=float)
+        y_p_a = np.asarray(y_p, dtype=float)
+        y_t_n = (y_t_a - lsl) / (usl - lsl)
+        y_p_n = (y_p_a - lsl) / (usl - lsl)
+
+        norm_dfs.append(
+            pd.DataFrame({
+                "observed_norm": y_t_n,
+                "predicted_norm": y_p_n,
+                "target": tgt,
+            })
+        )
+
+    if norm_dfs:
+        combined = pd.concat(norm_dfs, ignore_index=True)
+
+        targets_ordered = combined["target"].unique()
+        palette = px.colors.qualitative.Plotly + px.colors.qualitative.Alphabet
+        color_map = {t: palette[i % len(palette)] for i, t in enumerate(targets_ordered)}
+
+        fig = go.Figure()
+        for tgt in targets_ordered:
+            mask = combined["target"] == tgt
+            fig.add_trace(
+                go.Scatter(
+                    x=combined.loc[mask, "observed_norm"],
+                    y=combined.loc[mask, "predicted_norm"],
+                    mode="markers",
+                    marker=dict(color=color_map[tgt], size=5, opacity=0.5),
+                    name=tgt,
+                    hovertemplate="<b>%{text}</b><br>Obs: %{x:.3f}<br>Pred: %{y:.3f}<extra></extra>",
+                    text=[tgt] * mask.sum(),
+                )
+            )
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 1],
+                y=[0, 1],
+                mode="lines",
+                line=dict(color="#2dd4bf", dash="dash", width=2),
+                name="Perfecto",
+            )
+        )
+        fig.update_layout(
+            **DARK,
+            title="Observed vs Predicted (normalizado por spec por target)",
+            xaxis_title="Observado normalizado",
+            yaxis_title="Predicho normalizado",
+            height=500,
+        )
+        fig.update_xaxes(range=[-0.05, 1.05])
+        fig.update_yaxes(range=[-0.05, 1.05])
+        st.plotly_chart(fig, use_container_width=True)
+
+        total_points = len(combined)
+        n_targets = combined["target"].nunique()
+        st.caption(f"{total_points:,} puntos · {n_targets} targets")
+    else:
+        st.info("No hay targets de regresión con spec válida para el gráfico normalizado.")
+
 result = target_results[target]
 config = result["config"]
 
