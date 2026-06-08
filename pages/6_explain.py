@@ -59,7 +59,7 @@ st.markdown(
 st.caption(f"Reporte mljar: `{result['results_path']}`")
 st.divider()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
     [
         "📄 Reporte MLJAR",
         "🔀 Permutation Importance",
@@ -69,6 +69,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         "📊 Leaderboard",
         "🔮 Predicción Manual",
         "🌐 SHAP Global",
+        "🌐 Permutation Global",
     ]
 )
 
@@ -1168,6 +1169,173 @@ with tab8:
             fig.update_layout(
                 **DARK,
                 title=f"Mean |SHAP| por variable y target ({norm_mode})",
+                height=max(400, len(df) * 32 + 80),
+                xaxis=dict(tickangle=45, title="Targets"),
+                yaxis=dict(title="Variables de proceso"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("📋 Ver tabla de datos"):
+                st.dataframe(df.round(5), use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# TAB 9 – Permutation Global Heatmap (features × targets)
+# ---------------------------------------------------------------------------
+with tab9:
+    st.markdown("### 🌐 Permutation Global – Matriz de Importancia")
+    st.caption(
+        "Permutation Importance (mean drop in score) para cada par "
+        "(variable de proceso × target). Permite identificar qué variables "
+        "son relevantes globalmente a través de todos los targets del proyecto."
+    )
+
+    perm_global_key = f"perm_global_heatmap_{run['run_id']}"
+
+    if not has_model:
+        st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
+    else:
+        compute_all = st.button(
+            "⚡ Calcular Permutation para todos los targets", use_container_width=True
+        )
+
+        if compute_all:
+            with st.spinner("Calculando Permutation Importance para todos los targets (puede tomar varios minutos)..."):
+                try:
+                    from sklearn.inspection import permutation_importance
+
+                    all_imps = {}
+
+                    for t in targets:
+                        result_t = target_results[t]
+                        automl_t = result_t.get("automl")
+                        X_test_t = result_t.get("X_test")
+                        feature_cols_t = result_t.get("feature_cols") or []
+
+                        if automl_t is None or X_test_t is None:
+                            continue
+
+                        # Reuse from session state if already computed in tab2
+                        single_key = f"perm_{run['run_id']}_{t}"
+                        reuse = single_key in st.session_state
+
+                        if reuse:
+                            perm_df = st.session_state[single_key]
+                            imp = perm_df.set_index("Feature")["Importance"]
+                            all_imps[t] = imp
+                        else:
+                            scoring_t = (
+                                "neg_root_mean_squared_error"
+                                if result_t["config"]["task"] == "regression"
+                                else "f1_weighted"
+                            )
+                            perm = permutation_importance(
+                                automl_t,
+                                X_test_t,
+                                result_t["y_test"],
+                                scoring=scoring_t,
+                                n_repeats=8,
+                                random_state=42,
+                                n_jobs=-1,
+                            )
+                            imp = pd.Series(perm.importances_mean, index=feature_cols_t)
+                            all_imps[t] = imp
+
+                            # Store for future reuse in tab2
+                            perm_df = pd.DataFrame(
+                                {
+                                    "Feature": feature_cols_t,
+                                    "Importance": perm.importances_mean,
+                                    "Std": perm.importances_std,
+                                }
+                            ).sort_values("Importance", ascending=False)
+                            st.session_state[single_key] = perm_df
+
+                    if not all_imps:
+                        st.error("No se pudo calcular Permutation Importance para ningún target.")
+                    else:
+                        all_features = sorted(
+                            set().union(*[imp.index for imp in all_imps.values()])
+                        )
+                        matrix = pd.DataFrame(index=all_features)
+                        for t, imp in all_imps.items():
+                            matrix[t] = imp
+                        matrix = matrix.fillna(0)
+                        st.session_state[perm_global_key] = matrix
+                        st.success(
+                            f"Permutation global calculado para {len(all_imps)} targets. "
+                            f"Matriz: {matrix.shape[0]} variables × {matrix.shape[1]} targets."
+                        )
+
+                except Exception as exc:
+                    st.error(f"Error calculando Permutation global: {exc}")
+
+    if perm_global_key in st.session_state:
+        raw_df = st.session_state[perm_global_key]
+
+        with st.expander("⚙️ Opciones", expanded=False):
+            norm_mode = st.selectbox(
+                "Escala de color",
+                [
+                    "Raw (importance)",
+                    "Normalizado por fila (feature) 0-1",
+                    "Normalizado por columna (target) 0-1",
+                    "Log10(1 + importance)",
+                ],
+            )
+            min_val = st.slider(
+                "Importancia mínima",
+                0.0, float(raw_df.values.max()), 0.0,
+                key=f"perm_global_min_{run['run_id']}",
+            )
+            top_k = st.slider("Mostrar top K variables", 5, len(raw_df), len(raw_df),
+                              key=f"perm_global_topk_{run['run_id']}")
+
+        df = raw_df.copy()
+        df = df[df.mean(axis=1) >= min_val]
+        if len(df) > top_k:
+            df = df.loc[df.mean(axis=1).sort_values(ascending=False).index[:top_k]]
+
+        if df.empty:
+            st.warning("Sin datos con los filtros actuales.")
+        else:
+            if norm_mode == "Normalizado por fila (feature) 0-1":
+                z = (df.values - df.values.min(axis=1, keepdims=True)) / (
+                    df.values.max(axis=1, keepdims=True) - df.values.min(axis=1, keepdims=True) + 1e-12
+                )
+                text_vals = df.values
+                hover_prefix = "Norm"
+            elif norm_mode == "Normalizado por columna (target) 0-1":
+                z = (df.values - df.values.min(axis=0, keepdims=True)) / (
+                    df.values.max(axis=0, keepdims=True) - df.values.min(axis=0, keepdims=True) + 1e-12
+                )
+                text_vals = df.values
+                hover_prefix = "Norm"
+            elif norm_mode == "Log10(1 + importance)":
+                z = np.log10(1 + df.values)
+                text_vals = df.values
+                hover_prefix = "Log10"
+            else:
+                z = df.values
+                text_vals = df.values
+                hover_prefix = "Raw"
+
+            fig = go.Figure(
+                data=go.Heatmap(
+                    z=z,
+                    x=list(df.columns),
+                    y=list(df.index),
+                    colorscale="thermal",
+                    text=np.round(text_vals, 4),
+                    texttemplate="%{text}",
+                    hovertemplate=(
+                        f"Variable: %{{y}}<br>Target: %{{x}}<br>{hover_prefix}: %{{z:.4f}}"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+            fig.update_layout(
+                **DARK,
+                title=f"Permutation Importance por variable y target ({norm_mode})",
                 height=max(400, len(df) * 32 + 80),
                 xaxis=dict(tickangle=45, title="Targets"),
                 yaxis=dict(title="Variables de proceso"),
