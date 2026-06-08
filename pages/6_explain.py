@@ -1017,7 +1017,7 @@ with tab8:
                             individual_model = _get_individual_model(
                                 automl_t, result_t.get("best_model_name")
                             )
-                            is_cls_t = result_t["task"] == "classification"
+                            is_cls_t = result_t["config"]["task"] == "classification"
 
                             def _global_pred_wrapper(x: np.ndarray):
                                 x_df = pd.DataFrame(x, columns=background.columns)
@@ -1075,10 +1075,13 @@ with tab8:
 
                         # mean |SHAP| per feature
                         if isinstance(sv, list):
-                            # Multiclass: vstack across classes then average
+                            # Multiclass (TreeExplainer): list of (n, n_features)
                             feat_imp = np.abs(np.vstack(sv)).mean(axis=0)
                         else:
+                            # 2D: (n, n_features) or 3D: (n, n_features, n_classes)
                             feat_imp = np.abs(sv).mean(axis=0)
+                            while feat_imp.ndim > 1:
+                                feat_imp = feat_imp.mean(axis=-1)
 
                         all_imps[t] = pd.Series(feat_imp, index=fnames)
 
