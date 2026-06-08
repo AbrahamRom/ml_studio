@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -230,3 +233,70 @@ with tab5:
             detailed_df = detailed_df.sort_values(sort_column, ascending=ascending)
 
         st.dataframe(detailed_df.round(4), use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------------------------
+# Global export button
+# ---------------------------------------------------------------------------
+st.divider()
+
+
+def _build_compare_report(run, target_results, targets, compare_df, summary_df, best_metrics_df):
+    report = {
+        "project_info": {
+            "run_id": run["run_id"],
+            "timestamp": run.get("timestamp") or datetime.now().isoformat(),
+            "description": run.get("description", ""),
+            "base_path": str(run.get("base_path", "")),
+        },
+        "comparison": {},
+        "targets": {},
+    }
+
+    if compare_df is not None and not compare_df.empty:
+        report["comparison"]["final_matrix"] = {
+            "description": "Best metric value per (target, model_type) on holdout",
+            "data": compare_df.to_dict(),
+            "shape": list(compare_df.shape),
+            "targets": list(compare_df.index),
+            "model_types": list(compare_df.columns),
+        }
+
+    if summary_df is not None and not summary_df.empty:
+        report["comparison"]["target_summary"] = summary_df.to_dict(orient="records")
+
+    if best_metrics_df is not None and not best_metrics_df.empty:
+        report["comparison"]["best_model_metrics"] = best_metrics_df.to_dict(orient="records")
+
+    for t in targets:
+        res = target_results[t]
+        te = {"config": dict(res["config"])}
+        te["best_model"] = {
+            "name": res.get("best_model_name"),
+            "type": res.get("best_model_type"),
+        }
+        lb = res.get("leaderboard")
+        if lb is not None and not lb.empty:
+            te["leaderboard"] = lb.to_dict(orient="records")
+        pm = res.get("per_model_metrics")
+        if pm is not None and not pm.empty:
+            te["per_model_metrics"] = pm.to_dict(orient="records")
+        te["artifacts"] = {
+            "mljar_report": res.get("results_path"),
+            "leaderboard": res.get("leaderboard_path"),
+            "predictions": res.get("predictions_path"),
+            "metrics": res.get("metrics_path"),
+        }
+        report["targets"][t] = te
+
+    return report
+
+
+report_data = _build_compare_report(run, target_results, targets, compare_df, summary_df, best_metrics_df)
+report_json = json.dumps(report_data, indent=2, ensure_ascii=False)
+st.download_button(
+    label="📥 Descargar reporte de Comparación (JSON)",
+    data=report_json,
+    file_name="comparison_report.json",
+    mime="application/json",
+    use_container_width=True,
+)

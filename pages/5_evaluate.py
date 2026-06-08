@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -439,3 +442,77 @@ with st.expander("Archivos guardados para este target", expanded=False):
         ]
     )
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------------------------
+# Global export button
+# ---------------------------------------------------------------------------
+st.divider()
+
+
+def _build_evaluate_report(run, target, result, config, metrics, y_true, y_pred, proba, per_model_metrics, best_model_name):
+    report = {
+        "project_info": {
+            "run_id": run["run_id"],
+            "timestamp": run.get("timestamp") or datetime.now().isoformat(),
+            "description": run.get("description", ""),
+            "base_path": str(run.get("base_path", "")),
+        },
+        "target": target,
+        "config": dict(config),
+        "best_model": {
+            "name": best_model_name,
+            "type": result.get("best_model_type"),
+        },
+    }
+
+    report["metrics"] = {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))}
+
+    y_t = np.asarray(y_true)
+    y_p = np.asarray(y_pred)
+
+    if config["task"] == "classification":
+        classes = metrics.get("classes") or sorted(pd.unique(pd.Series(y_t))).tolist()
+        report["classification_report"] = metrics.get("classification_report")
+        report["classes"] = classes
+        report["confusion_matrix"] = metrics.get("confusion_matrix")
+        if proba is not None:
+            report["probability_shape"] = list(np.asarray(proba).shape)
+    else:
+        residuals = y_t - y_p
+        report["residuals"] = {
+            "mean": float(np.mean(residuals)),
+            "std": float(np.std(residuals)),
+            "min": float(np.min(residuals)),
+            "max": float(np.max(residuals)),
+            "percentile_25": float(np.percentile(residuals, 25)),
+            "percentile_75": float(np.percentile(residuals, 75)),
+            "mean_abs": float(np.mean(np.abs(residuals))),
+        }
+        report["predictions_summary"] = {
+            "y_true": {"mean": float(np.mean(y_t)), "std": float(np.std(y_t)), "min": float(np.min(y_t)), "max": float(np.max(y_t))},
+            "y_pred": {"mean": float(np.mean(y_p)), "std": float(np.std(y_p)), "min": float(np.min(y_p)), "max": float(np.max(y_p))},
+            "n": int(len(y_t)),
+        }
+
+    report["artifacts"] = {
+        "mljar_report": result.get("results_path"),
+        "leaderboard": result.get("leaderboard_path"),
+        "predictions": result.get("predictions_path"),
+        "metrics": result.get("metrics_path"),
+    }
+
+    return report
+
+
+report_data = _build_evaluate_report(
+    run, target, result, config, metrics, y_true, y_pred, proba,
+    per_model_metrics, selected_model_name,
+)
+report_json = json.dumps(report_data, indent=2, ensure_ascii=False)
+st.download_button(
+    label="📥 Descargar reporte de Evaluación (JSON)",
+    data=report_json,
+    file_name="evaluation_report.json",
+    mime="application/json",
+    use_container_width=True,
+)
