@@ -82,6 +82,46 @@ with tab1:
         )
         st.dataframe(best_metrics_df.round(4), use_container_width=True, hide_index=True)
 
+    st.markdown("### Heatmap de desempeño (mejor modelo por target)")
+    st.caption("Cada celda es el valor de la métrica para el mejor modelo de cada target en holdout.")
+
+    if best_metrics_df is not None and not best_metrics_df.empty:
+        _exclude = {
+            "Target", "Mejor modelo holdout", "Tipo holdout", "Métrica usada",
+            "Holdout min", "Holdout max", "Holdout media", "Holdout mediana",
+        }
+        _metric_cols = [
+            c for c in best_metrics_df.columns
+            if c not in _exclude and pd.api.types.is_numeric_dtype(best_metrics_df[c])
+        ]
+        if _metric_cols:
+            _defaults = [c for c in ["r2", "nrmse", "nmae", "rmse", "mae", "smape", "score_global"] if c in _metric_cols]
+            _sel = st.multiselect("Métricas para el heatmap", _metric_cols, default=_defaults, key="hm_metrics")
+            if _sel:
+                _labels = {
+                    "r2": "R²", "r2_adjusted": "R² Ajustado", "rmse": "RMSE", "mae": "MAE",
+                    "mse": "MSE", "mape": "MAPE", "smape": "SMAPE",
+                    "nrmse": "NRMSE", "nmae": "NMAE", "score_global": "Score Global",
+                }
+                _data = best_metrics_df.set_index("Target")[_sel].rename(columns={c: _labels.get(c, c) for c in _sel})
+                fig = go.Figure(
+                    go.Heatmap(
+                        z=_data.values,
+                        x=_data.columns,
+                        y=_data.index,
+                        text=_data.round(4).values,
+                        texttemplate="%{text}",
+                        colorscale="Viridis",
+                        hovertemplate="Target: %{y}<br>%{x}: %{text}<extra></extra>",
+                    )
+                )
+                fig.update_layout(
+                    **DARK, title="Métricas por target",
+                    height=200 + 40 * len(_data),
+                    xaxis=dict(tickangle=-45),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
 with tab2:
     target = st.selectbox("Target", targets, key="compare_target")
     result = target_results[target]
