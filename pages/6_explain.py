@@ -1,3 +1,5 @@
+import json
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -185,6 +187,99 @@ def _manual_partial_dependence(
             preds = _predict_with_original_dtypes(model, X_perturbed, X)
             pdp[j] = np.asarray(preds).ravel().mean()
         return {"average": pdp[np.newaxis, :], "individual": None, "values": grid}
+
+
+# ---------------------------------------------------------------------------
+# Report builder: export all explainability results as a structured dict
+# suitable for LLM consumption (thesis writing, reports, etc.)
+# ---------------------------------------------------------------------------
+def _build_explainability_report(run, target_results, targets):
+    run_id = run["run_id"]
+    report = {
+        "project_info": {
+            "run_id": run_id,
+            "timestamp": run.get("timestamp") or datetime.now().isoformat(),
+            "description": run.get("description", ""),
+            "base_path": str(run.get("base_path", "")),
+        },
+        "targets": {},
+        "global_matrices": {},
+    }
+
+    # Global matrices from session state
+    shap_global_key = f"shap_global_heatmap_{run_id}"
+    if shap_global_key in st.session_state:
+        df = st.session_state[shap_global_key]
+        report["global_matrices"]["shap_global"] = {
+            "description": "Mean |SHAP| per feature and target",
+            "matrix": df.to_dict(),
+            "shape": list(df.shape),
+            "features": list(df.index),
+            "targets": list(df.columns),
+        }
+
+    perm_global_key = f"perm_global_heatmap_{run_id}"
+    if perm_global_key in st.session_state:
+        df = st.session_state[perm_global_key]
+        report["global_matrices"]["permutation_global"] = {
+            "description": "Permutation importance (mean drop in score) per feature and target",
+            "matrix": df.to_dict(),
+            "shape": list(df.shape),
+            "features": list(df.index),
+            "targets": list(df.columns),
+        }
+
+    for t in targets:
+        result_t = target_results[t]
+        target_entry = {"config": {}, "best_model": {}, "leaderboard": None}
+        target_entry["config"] = {
+            "task": result_t["config"]["task"],
+            "direction": result_t["config"].get("direction", "min"),
+            "metric": result_t["config"].get("metric", ""),
+        }
+        target_entry["best_model"] = {
+            "name": result_t.get("best_model_name"),
+            "type": result_t.get("best_model_type"),
+        }
+
+        lb = result_t.get("leaderboard")
+        if lb is not None and not lb.empty:
+            target_entry["leaderboard"] = lb.to_dict(orient="records")
+
+        # Permutation importance for this target
+        perm_key = f"perm_{run_id}_{t}"
+        if perm_key in st.session_state:
+            perm_df = st.session_state[perm_key]
+            target_entry["permutation_importance"] = perm_df.to_dict(orient="records")
+
+        # SHAP aggregate for this target
+        shap_key = f"shap_{run_id}_{t}"
+        if shap_key in st.session_state:
+            sd = st.session_state[shap_key]
+            sv = sd["shap_values"]
+            fnames = sd["feature_names"]
+            target_entry["shap"] = {
+                "eval_samples": len(sd.get("X_eval", [])),
+                "shape": str(sv.shape) if hasattr(sv, "shape") else str(len(sv)),
+                "type": "multiclass list" if isinstance(sv, list) else "array",
+                "n_features": len(fnames),
+            }
+            # mean |SHAP| per feature
+            if isinstance(sv, list):
+                sv_agg = np.abs(np.vstack(sv)).mean(axis=0)
+            else:
+                sv_agg = np.abs(sv).mean(axis=0)
+                while sv_agg.ndim > 1:
+                    sv_agg = sv_agg.mean(axis=-1)
+            target_entry["shap"]["mean_abs_shap"] = dict(zip(fnames, sv_agg.tolist()))
+
+        target_entry["note"] = (
+            "LIME y PDP/ICE no se incluyen en el reporte global; "
+            "se computan por instancia/feature a pedido en la UI."
+        )
+        report["targets"][t] = target_entry
+
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -1344,3 +1439,17 @@ with tab9:
 
             with st.expander("📋 Ver tabla de datos"):
                 st.dataframe(df.round(5), use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# Global export button (always visible after tabs)
+# ---------------------------------------------------------------------------
+st.divider()
+report_data = _build_explainability_report(run, target_results, targets)
+report_json = json.dumps(report_data, indent=2, ensure_ascii=False)
+st.download_button(
+    label="📥 Descargar reporte de Explainabilidad (JSON)",
+    data=report_json,
+    file_name="explainability_report.json",
+    mime="application/json",
+    use_container_width=True,
+)
