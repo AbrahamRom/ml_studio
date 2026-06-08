@@ -59,7 +59,7 @@ st.markdown(
 st.caption(f"Reporte mljar: `{result['results_path']}`")
 st.divider()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         "📄 Reporte MLJAR",
         "🔀 Permutation Importance",
@@ -68,6 +68,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "📈 PDP / ICE",
         "📊 Leaderboard",
         "🔮 Predicción Manual",
+        "🌐 SHAP Global",
     ]
 )
 
@@ -960,3 +961,181 @@ with tab7:
                         pass
             except Exception as exc:
                 st.error(f"Error en predicción manual: {exc}")
+
+# ---------------------------------------------------------------------------
+# TAB 8 – SHAP Global Heatmap (features × targets)
+# ---------------------------------------------------------------------------
+with tab8:
+    st.markdown("### 🌐 SHAP Global – Matriz de Importancia")
+    st.caption(
+        "Mean |SHAP| para cada par (variable de proceso × target). "
+        "Permite identificar qué variables son relevantes globalmente "
+        "a través de todos los targets del proyecto."
+    )
+
+    shap_global_key = f"shap_global_heatmap_{run['run_id']}"
+
+    if not has_model:
+        st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
+    else:
+        compute_all = st.button(
+            "⚡ Calcular SHAP para todos los targets", use_container_width=True
+        )
+
+        if compute_all:
+            with st.spinner("Calculando SHAP para todos los targets (puede tomar varios minutos)..."):
+                try:
+                    import shap
+                    from shap import TreeExplainer, PermutationExplainer, KernelExplainer
+
+                    all_imps = {}
+
+                    for t in targets:
+                        result_t = target_results[t]
+                        automl_t = result_t.get("automl")
+                        X_test_t = result_t.get("X_test")
+                        feature_cols_t = result_t.get("feature_cols") or []
+
+                        if automl_t is None or X_test_t is None:
+                            continue
+
+                        # Reuse from session state if already computed in tab3
+                        single_key = f"shap_{run['run_id']}_{t}"
+                        reuse = single_key in st.session_state
+
+                        if reuse:
+                            sd = st.session_state[single_key]
+                            sv = sd["shap_values"]
+                            fnames = sd["feature_names"]
+                        else:
+                            X_numeric = _prepare_numeric_xai(X_test_t, feature_cols_t)
+                            if X_numeric.empty:
+                                continue
+
+                            bg_size = min(100, len(X_numeric))
+                            background = X_numeric.sample(n=bg_size, random_state=42)
+                            individual_model = _get_individual_model(
+                                automl_t, result_t.get("best_model_name")
+                            )
+                            is_cls_t = result_t["task"] == "classification"
+
+                            def _global_pred_wrapper(x: np.ndarray):
+                                x_df = pd.DataFrame(x, columns=background.columns)
+                                for col in background.columns:
+                                    od = background[col].dtype
+                                    if od != x_df[col].dtype:
+                                        try:
+                                            if np.issubdtype(od, np.integer):
+                                                x_df[col] = x_df[col].round().astype(od)
+                                            else:
+                                                x_df[col] = x_df[col].astype(od)
+                                        except (ValueError, TypeError):
+                                            pass
+                                if is_cls_t and hasattr(individual_model, "predict_proba"):
+                                    return individual_model.predict_proba(x_df)
+                                return individual_model.predict(x_df)
+
+                            eval_size = min(200, len(X_numeric))
+                            X_eval = X_numeric.iloc[:eval_size]
+                            fnames = list(X_numeric.columns)
+
+                            sv = None
+                            # TreeExplainer
+                            try:
+                                if hasattr(individual_model, "get_booster") or hasattr(individual_model, "feature_importances_"):
+                                    te = TreeExplainer(individual_model)
+                                    sv_t = te.shap_values(X_eval)
+                                    if sv_t is not None:
+                                        sv = sv_t
+                            except Exception:
+                                pass
+
+                            # PermutationExplainer
+                            if sv is None:
+                                try:
+                                    pe = PermutationExplainer(_global_pred_wrapper, background.values)
+                                    sv_p = pe(X_eval.values)
+                                    if sv_p is not None:
+                                        sv = sv_p.values
+                                except Exception:
+                                    pass
+
+                            # KernelExplainer
+                            if sv is None:
+                                try:
+                                    ke = KernelExplainer(_global_pred_wrapper, background.values)
+                                    sv_k = ke.shap_values(X_eval.values)
+                                    if sv_k is not None:
+                                        sv = sv_k
+                                except Exception:
+                                    pass
+
+                            if sv is None:
+                                continue
+
+                        # mean |SHAP| per feature
+                        if isinstance(sv, list):
+                            # Multiclass: vstack across classes then average
+                            feat_imp = np.abs(np.vstack(sv)).mean(axis=0)
+                        else:
+                            feat_imp = np.abs(sv).mean(axis=0)
+
+                        all_imps[t] = pd.Series(feat_imp, index=fnames)
+
+                    if not all_imps:
+                        st.error("No se pudo calcular SHAP para ningún target.")
+                    else:
+                        all_features = sorted(set().union(*[imp.index for imp in all_imps.values()]))
+                        matrix = pd.DataFrame(index=all_features)
+                        for t, imp in all_imps.items():
+                            matrix[t] = imp
+                        matrix = matrix.fillna(0)
+                        st.session_state[shap_global_key] = matrix
+                        st.success(
+                            f"SHAP global calculado para {len(all_imps)} targets. "
+                            f"Matriz: {matrix.shape[0]} variables × {matrix.shape[1]} targets."
+                        )
+
+                except Exception as exc:
+                    st.error(f"Error calculando SHAP global: {exc}")
+
+    if shap_global_key in st.session_state:
+        heatmap_df = st.session_state[shap_global_key]
+
+        with st.expander("⚙️ Opciones", expanded=False):
+            min_val = st.slider(
+                "Importancia mínima (mean |SHAP|)",
+                0.0, float(heatmap_df.values.max()), 0.0,
+            )
+            top_k = st.slider("Mostrar top K variables", 5, len(heatmap_df), len(heatmap_df))
+
+        df = heatmap_df.copy()
+        df = df[df.mean(axis=1) >= min_val]
+        if len(df) > top_k:
+            df = df.loc[df.mean(axis=1).sort_values(ascending=False).index[:top_k]]
+
+        if df.empty:
+            st.warning("Sin datos con los filtros actuales.")
+        else:
+            fig = go.Figure(
+                data=go.Heatmap(
+                    z=df.values,
+                    x=list(df.columns),
+                    y=list(df.index),
+                    colorscale="Viridis",
+                    text=np.round(df.values, 4),
+                    texttemplate="%{text}",
+                    hovertemplate="Variable: %{y}<br>Target: %{x}<br>Mean |SHAP|: %{z:.4f}<extra></extra>",
+                )
+            )
+            fig.update_layout(
+                **DARK,
+                title="Mean |SHAP| por variable y target",
+                height=max(400, len(df) * 32 + 80),
+                xaxis=dict(tickangle=45, title="Targets"),
+                yaxis=dict(title="Variables de proceso"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("📋 Ver tabla de datos"):
+                st.dataframe(df.round(5), use_container_width=True)
