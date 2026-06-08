@@ -20,7 +20,7 @@ from sklearn.metrics import (
 )
 
 
-def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
+def regression_metrics(y_true, y_pred, n_features: int | None = None, spec_range: float | None = None) -> dict:
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     mse = mean_squared_error(y_true, y_pred)
@@ -72,14 +72,22 @@ def regression_metrics(y_true, y_pred, n_features: int | None = None) -> dict:
         global_score = float(
             sum(weights[name] * score for name, score in present_scores.items()) / total_weight
         )
+
+    # NRMSE = RMSE / spec_range
+    rmse_val = float(np.sqrt(mse))
+    nrmse = None
+    if spec_range is not None and spec_range > 0:
+        nrmse = float(rmse_val / spec_range)
+
     return {
         "r2": r2,
         "r2_adjusted": adjusted_r2,
         "mae": float(mean_absolute_error(y_true, y_pred)),
         "mse": float(mse),
-        "rmse": float(np.sqrt(mse)),
+        "rmse": rmse_val,
         "mape": mape,
         "smape": smape,
+        "nrmse": nrmse,
         "score_global": global_score,
     }
 
@@ -174,7 +182,8 @@ def compute_holdout_metrics(
     proba=None,
     n_features: int | None = None,
     proba_classes=None,
+    spec_range: float | None = None,
 ) -> dict:
     if task == "regression":
-        return regression_metrics(y_true, y_pred, n_features=n_features)
+        return regression_metrics(y_true, y_pred, n_features=n_features, spec_range=spec_range)
     return classification_metrics(y_true, y_pred, proba, proba_classes=proba_classes)

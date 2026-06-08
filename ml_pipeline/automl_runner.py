@@ -19,6 +19,7 @@ from .early_warning import (
     fit_residual_uncertainty,
     load_quality_specs,
     resolve_quality_spec,
+    _spec_type,
 )
 from .metrics import compute_holdout_metrics
 from .plots import save_evaluation_plots
@@ -261,6 +262,36 @@ def _all_tracked_models(automl) -> list:
     return models + stacked_models
 
 
+def _resolve_spec_range(quality_spec: dict | None, spec_key: str | None) -> float | None:
+    """Compute the specification range from a quality spec for NRMSE calculation.
+
+    two_sided  → upper - lower
+    upper_only → upper (lower bound is 0)
+    lower_only → if unit is '%' or key suggests percentage, range = 100 - lower
+                 otherwise assume upper = 2 * lower, so range = lower
+    no spec    → None
+    """
+    if quality_spec is None:
+        return None
+    spec = quality_spec.get("spec") or {}
+    spec_type = _spec_type(spec)
+    if spec_type == "two_sided":
+        lower = float(spec.get("lower", 0))
+        upper = float(spec.get("upper", 0))
+        return upper - lower
+    if spec_type == "upper_only":
+        return float(spec.get("upper", 0))
+    if spec_type == "lower_only":
+        lower = float(spec.get("lower", 0))
+        unit = quality_spec.get("unit", "")
+        key_lower = (spec_key or "").lower()
+        if unit == "%" or "percent" in key_lower:
+            return 100.0 - lower
+        # For unknown upper bound, assume upper = 2 * lower → range = lower
+        return lower
+    return None
+
+
 def _coerce_1d_prediction(output):
     if output is None:
         return None
@@ -313,9 +344,12 @@ def _collect_model_metrics(
     y_test,
     task: str,
     n_features: int,
+    quality_spec: dict | None = None,
+    target: str | None = None,
 ) -> pd.DataFrame:
     rows: list[dict] = []
     seen_names: set[str] = set()
+    spec_range = _resolve_spec_range(quality_spec, target)
     for index, model in enumerate(_all_tracked_models(automl), start=1):
         model_name = _model_display_name(model, index)
         if model_name in seen_names:
@@ -350,6 +384,7 @@ def _collect_model_metrics(
                     proba,
                     n_features=n_features,
                     proba_classes=proba_classes,
+                    spec_range=spec_range,
                 )
             )
         except Exception as exc:
@@ -369,6 +404,7 @@ def _collect_model_metrics(
         "mae",
         "mape",
         "smape",
+        "nrmse",
         "accuracy",
         "f1",
         "f3",
@@ -479,6 +515,13 @@ def run_target_automl(
             proba = None
             proba_classes = None
 
+    # Resolve quality spec early so spec_range is available for NRMSE in metrics
+    quality_spec_key = None
+    quality_spec = None
+    if config["task"] == "regression":
+        specs = load_quality_specs()
+        quality_spec_key, quality_spec = resolve_quality_spec(target, specs)
+
     leaderboard = automl.get_leaderboard(original_metric_values=True)
     per_model_metrics = _collect_model_metrics(
         automl,
@@ -486,6 +529,8 @@ def run_target_automl(
         y_test,
         config["task"],
         n_features=len(feature_cols),
+        quality_spec=quality_spec,
+        target=target,
     )
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
     best_holdout_row = _best_holdout_row(per_model_metrics, config)
@@ -510,6 +555,7 @@ def run_target_automl(
         proba,
         n_features=len(feature_cols),
         proba_classes=proba_classes,
+        spec_range=_resolve_spec_range(quality_spec, target),
     )
 
     pred_df = pd.DataFrame(
@@ -531,65 +577,60 @@ def run_target_automl(
     calibration_residuals_path = None
     early_warning_predictions_path = None
     early_warning_metrics_path = None
-    quality_spec_key = None
-    quality_spec = None
 
-    if config["task"] == "regression":
-        specs = load_quality_specs()
-        quality_spec_key, quality_spec = resolve_quality_spec(target, specs)
-        if quality_spec is not None:
-            try:
-                calib_pred, _, _ = predict_with_model(
-                    automl,
-                    best_model_name,
-                    X_calib,
-                    config["task"],
-                )
-                if calib_pred is None and not X_calib.empty:
-                    calib_pred = _coerce_1d_prediction(automl.predict(X_calib))
-                if calib_pred is None or X_calib.empty:
-                    raise ValueError("No hay particion de calibracion disponible.")
+    if config["task"] == "regression" and quality_spec is not None:
+        try:
+            calib_pred, _, _ = predict_with_model(
+                automl,
+                best_model_name,
+                X_calib,
+                config["task"],
+            )
+            if calib_pred is None and not X_calib.empty:
+                calib_pred = _coerce_1d_prediction(automl.predict(X_calib))
+            if calib_pred is None or X_calib.empty:
+                raise ValueError("No hay particion de calibracion disponible.")
 
-                calibration_residuals = fit_residual_uncertainty(y_calib, calib_pred)
-                residual_df = pd.DataFrame(
-                    {
-                        "row_index": X_calib.index,
-                        "target": target,
-                        "y_true": y_calib.to_numpy(),
-                        "y_pred": calib_pred,
-                        "residual": calibration_residuals,
-                    }
-                )
-                early_warning_predictions = compute_early_warning_predictions(
-                    y_test,
-                    y_pred,
-                    calibration_residuals,
-                    quality_spec,
-                    row_index=X_test.index,
-                    target=target,
-                )
-                early_warning_metrics = compute_early_warning_metrics(early_warning_predictions)
-                early_warning_metrics.update(
-                    {
-                        "quality_spec_key": quality_spec_key,
-                        "calibration_rows": int(len(X_calib)),
-                        "residual_count": int(len(calibration_residuals)),
-                    }
-                )
-                calibration_residuals_path = save_dataframe(
-                    t_dir / "calibration_residuals.csv",
-                    residual_df,
-                )
-                early_warning_predictions_path = save_dataframe(
-                    t_dir / "early_warning_predictions.csv",
-                    early_warning_predictions,
-                )
-                early_warning_metrics_path = save_json(
-                    t_dir / "early_warning_metrics.json",
-                    early_warning_metrics,
-                )
-            except Exception as exc:
-                early_warning_error = str(exc)
+            calibration_residuals = fit_residual_uncertainty(y_calib, calib_pred)
+            residual_df = pd.DataFrame(
+                {
+                    "row_index": X_calib.index,
+                    "target": target,
+                    "y_true": y_calib.to_numpy(),
+                    "y_pred": calib_pred,
+                    "residual": calibration_residuals,
+                }
+            )
+            early_warning_predictions = compute_early_warning_predictions(
+                y_test,
+                y_pred,
+                calibration_residuals,
+                quality_spec,
+                row_index=X_test.index,
+                target=target,
+            )
+            early_warning_metrics = compute_early_warning_metrics(early_warning_predictions)
+            early_warning_metrics.update(
+                {
+                    "quality_spec_key": quality_spec_key,
+                    "calibration_rows": int(len(X_calib)),
+                    "residual_count": int(len(calibration_residuals)),
+                }
+            )
+            calibration_residuals_path = save_dataframe(
+                t_dir / "calibration_residuals.csv",
+                residual_df,
+            )
+            early_warning_predictions_path = save_dataframe(
+                t_dir / "early_warning_predictions.csv",
+                early_warning_predictions,
+            )
+            early_warning_metrics_path = save_json(
+                t_dir / "early_warning_metrics.json",
+                early_warning_metrics,
+            )
+        except Exception as exc:
+            early_warning_error = str(exc)
 
     if not early_warning_predictions.empty:
         ew_cols = [
