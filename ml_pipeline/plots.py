@@ -12,9 +12,9 @@ from sklearn.metrics import precision_recall_curve, roc_curve
 
 
 DARK = dict(
-    paper_bgcolor="#0d0f14",
-    plot_bgcolor="#141720",
-    font_color="#e2e8f0",
+    paper_bgcolor="#ffffff",
+    plot_bgcolor="#f8f9fa",
+    font_color="#1e293b",
 )
 
 
@@ -98,7 +98,7 @@ def save_classification_plots(out_dir: str | Path, target: str, y_true, y_pred, 
             y=[f"Real: {label}" for label in matrix.index],
             text=matrix.values,
             texttemplate="%{text}",
-            colorscale="Blues",
+            colorscale=[[0, 'white'], [1, '#3b82f6']],
         )
     )
     cm.update_layout(**DARK, title=f"Matriz de confusión - {target}")

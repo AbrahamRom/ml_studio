@@ -12,9 +12,9 @@ from ml_pipeline.quality import (
 )
 
 DARK = dict(
-    paper_bgcolor="#0d0f14",
-    plot_bgcolor="#141720",
-    font={"color": "#e2e8f0"},
+    paper_bgcolor="#ffffff",
+    plot_bgcolor="#f8f9fa",
+    font={"color": "#1e293b"},
 )
 
 st.markdown("# 🔍 EDA & Calidad de Datos")
@@ -112,7 +112,7 @@ with tab3:
         corr = num_df.corr().round(2)
         fig = go.Figure(go.Heatmap(
             z=corr.values, x=corr.columns, y=corr.index,
-            colorscale="RdBu", zmid=0,
+            colorscale=[[0, 'white'], [1, '#3b82f6']],
             text=corr.values.round(2), texttemplate="%{text}",
         ))
         fig.update_layout(**DARK, height=520, title="Matriz de correlación",
@@ -124,8 +124,8 @@ with tab3:
             target_num = [t for t in targets if t in num_df.columns]
             if target_num:
                 corr_targets = num_df.corr()[target_num].drop(index=target_num, errors="ignore")
-                fig2 = px.imshow(corr_targets.T, color_continuous_scale="RdBu",
-                                 color_continuous_midpoint=0, text_auto=True,
+                fig2 = px.imshow(corr_targets.T, color_continuous_scale=[[0, 'white'], [1, '#3b82f6']],
+                                 text_auto=True,
                                  title="Features vs Targets")
                 fig2.update_layout(**DARK, height=300)
                 st.plotly_chart(fig2, use_container_width=True)

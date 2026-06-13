@@ -22,9 +22,9 @@ from ml_pipeline.early_warning_report import generate_early_warning_report
 
 
 DARK = dict(
-    paper_bgcolor="#0d0f14",
-    plot_bgcolor="#141720",
-    font={"color": "#e2e8f0"},
+    paper_bgcolor="#ffffff",
+    plot_bgcolor="#f8f9fa",
+    font={"color": "#1e293b"},
 )
 
 
@@ -91,7 +91,7 @@ def _show_confusion_matrix(metrics, title):
             y=["Actual: No event", "Actual: Event"],
             text=text,
             texttemplate="%{text}",
-            colorscale="Reds",
+            colorscale=[[0, 'white'], [1, '#3b82f6']],
         )
     )
     fig.update_layout(**DARK, title=title, height=390)

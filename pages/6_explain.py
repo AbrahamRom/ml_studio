@@ -10,9 +10,9 @@ import streamlit as st
 from ml_pipeline.automl_runner import resolve_model_by_name
 
 DARK = dict(
-    paper_bgcolor="#0d0f14",
-    plot_bgcolor="#141720",
-    font={"color": "#e2e8f0"},
+    paper_bgcolor="#ffffff",
+    plot_bgcolor="#f8f9fa",
+    font={"color": "#1e293b"},
 )
 
 # ---------------------------------------------------------------------------
@@ -1252,7 +1252,7 @@ with tab8:
                     z=z,
                     x=list(df.columns),
                     y=list(df.index),
-                    colorscale="thermal",
+                    colorscale=[[0, 'white'], [1, '#3b82f6']],
                     text=np.round(text_vals, 4),
                     texttemplate="%{text}",
                     hovertemplate=(
@@ -1419,7 +1419,7 @@ with tab9:
                     z=z,
                     x=list(df.columns),
                     y=list(df.index),
-                    colorscale="thermal",
+                    colorscale=[[0, 'white'], [1, '#3b82f6']],
                     text=np.round(text_vals, 4),
                     texttemplate="%{text}",
                     hovertemplate=(

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -12,9 +13,9 @@ from ml_pipeline.comparison import (
 )
 
 DARK = dict(
-    paper_bgcolor="#0d0f14",
-    plot_bgcolor="#141720",
-    font={"color": "#e2e8f0"},
+    paper_bgcolor="#ffffff",
+    plot_bgcolor="#f8f9fa",
+    font={"color": "#1e293b"},
 )
 PALETTE = ["#5b6af0", "#2dd4bf", "#f59e0b", "#f43f5e", "#a78bfa", "#34d399"]
 
@@ -107,15 +108,51 @@ with tab1:
                     "nrmse": "NRMSE", "nmae": "NMAE", "score_global": "Score Global",
                 }
                 _data = best_metrics_df.set_index("Target")[_sel].rename(columns={c: _labels.get(c, c) for c in _sel})
+
+                with st.expander("⚙️ Opciones de escala", expanded=False):
+                    norm_mode = st.selectbox(
+                        "Escala de color",
+                        [
+                            "Raw (valor original)",
+                            "Normalizado por fila (target) 0-1",
+                            "Normalizado por columna (métrica) 0-1",
+                            "Log10(1 + valor)",
+                        ],
+                        key="hm_norm_mode",
+                    )
+
+                z_values = _data.values.copy().astype(float)
+                text_vals = _data.round(4).values
+
+                if norm_mode == "Normalizado por fila (target) 0-1":
+                    row_min = z_values.min(axis=1, keepdims=True)
+                    row_max = z_values.max(axis=1, keepdims=True)
+                    z = (z_values - row_min) / (row_max - row_min + 1e-12)
+                    hover_prefix = "Norm"
+                elif norm_mode == "Normalizado por columna (métrica) 0-1":
+                    col_min = z_values.min(axis=0, keepdims=True)
+                    col_max = z_values.max(axis=0, keepdims=True)
+                    z = (z_values - col_min) / (col_max - col_min + 1e-12)
+                    hover_prefix = "Norm"
+                elif norm_mode == "Log10(1 + valor)":
+                    z = np.log10(1 + np.abs(z_values))
+                    hover_prefix = "Log10"
+                else:
+                    z = z_values
+                    hover_prefix = "Raw"
+
                 fig = go.Figure(
                     go.Heatmap(
-                        z=_data.values,
+                        z=z,
                         x=_data.columns,
                         y=_data.index,
-                        text=_data.round(4).values,
+                        text=text_vals,
                         texttemplate="%{text}",
-                        colorscale="thermal",
-                        hovertemplate="Target: %{y}<br>%{x}: %{text}<extra></extra>",
+                        colorscale=[[0, 'white'], [1, '#3b82f6']],
+                        hovertemplate=(
+                            f"Target: %{{y}}<br>%{{x}}: %{{text}}<br>"
+                            f"{hover_prefix}: %{{z:.4f}}<extra></extra>"
+                        ),
                     )
                 )
                 fig.update_layout(
