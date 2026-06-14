@@ -360,7 +360,7 @@ if do_recompute:
                 "target": selected_target,
                 "y_true": y_true,
                 "y_pred": y_pred,
-                "residual": y_true - y_pred if residuals_arr is None else residuals_arr[:len(y_true)],
+                "residual": y_true - y_pred,
             }
         )
         calib_path = save_dataframe(t_dir / "calibration_residuals.csv", residual_df)
