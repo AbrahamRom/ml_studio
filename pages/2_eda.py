@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from ml_pipeline.early_warning import load_column_display_names, load_quality_specs, resolve_display_name
 from ml_pipeline.quality import (
     compute_variable_stats,
     variable_stats_to_csv,
@@ -25,6 +26,8 @@ if st.session_state.df is None:
 
 df = st.session_state.df
 targets = st.session_state.target_cols or []
+_specs = load_quality_specs()
+_col_names = load_column_display_names()
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["📋 Resumen", "📈 Distribuciones", "🔗 Correlaciones", "❗ Calidad", "📐 Estadísticas"]
@@ -73,11 +76,12 @@ with tab2:
             cols  = st.columns(len(batch))
             for j, col_name in enumerate(batch):
                 with cols[j]:
+                    _dname = resolve_display_name(col_name, _specs, _col_names)
                     color = "#5b6af0" if col_name not in targets else "#2dd4bf"
                     fig = px.histogram(
                         df, x=col_name, nbins=40,
                         color_discrete_sequence=[color],
-                        title=f"{'🎯 ' if col_name in targets else ''}{col_name}",
+                        title=f"{'🎯 ' if col_name in targets else ''}{_dname}",
                     )
                     fig.update_layout(**DARK, height=260, margin=dict(t=36, b=10, l=10, r=10),
                                       showlegend=False)
@@ -86,10 +90,11 @@ with tab2:
     if cat_cols:
         st.markdown("#### Variables categóricas")
         for col_name in cat_cols:
+            _dname = resolve_display_name(col_name, _specs, _col_names)
             vc = df[col_name].value_counts().head(20)
             fig = px.bar(x=vc.index, y=vc.values,
-                         labels={"x": col_name, "y": "Frecuencia"},
-                         title=col_name, color_discrete_sequence=["#5b6af0"])
+                         labels={"x": _dname, "y": "Frecuencia"},
+                         title=_dname, color_discrete_sequence=["#5b6af0"])
             fig.update_layout(**DARK, height=280, margin=dict(t=36, b=10, l=10, r=10))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -97,9 +102,11 @@ with tab2:
         st.markdown("#### Targets vs Features (scatter)")
         feat   = st.selectbox("Feature X", [c for c in num_cols if c not in targets])
         target_sel = st.selectbox("Target Y", targets)
+        _feat_dn = resolve_display_name(feat, _specs, _col_names)
+        _target_dn = resolve_display_name(target_sel, _specs, _col_names)
         fig = px.scatter(df, x=feat, y=target_sel, trendline="ols",
                          color_discrete_sequence=["#2dd4bf"],
-                         opacity=0.6, title=f"{feat} vs {target_sel}")
+                         opacity=0.6, title=f"{_feat_dn} vs {_target_dn}")
         fig.update_layout(**DARK, height=380)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -110,8 +117,9 @@ with tab3:
         st.info("Se necesitan al menos 2 columnas numéricas.")
     else:
         corr = num_df.corr().round(2)
+        _corr_labels = [resolve_display_name(c, _specs, _col_names) for c in corr.columns]
         fig = go.Figure(go.Heatmap(
-            z=corr.values, x=corr.columns, y=corr.index,
+            z=corr.values, x=_corr_labels, y=_corr_labels,
             colorscale=[[0, 'white'], [1, '#3b82f6']],
             text=corr.values.round(2), texttemplate="%{text}",
         ))
@@ -124,9 +132,14 @@ with tab3:
             target_num = [t for t in targets if t in num_df.columns]
             if target_num:
                 corr_targets = num_df.corr()[target_num].drop(index=target_num, errors="ignore")
+                _ct_labels = [resolve_display_name(c, _specs, _col_names) for c in corr_targets.columns]
+                _ct_index = [resolve_display_name(c, _specs, _col_names) for c in corr_targets.index]
                 fig2 = px.imshow(corr_targets.T, color_continuous_scale=[[0, 'white'], [1, '#3b82f6']],
                                  text_auto=True,
-                                 title="Features vs Targets")
+                                 title="Features vs Targets",
+                                 labels=dict(x="Target", y="Feature"))
+                fig2.update_xaxes(ticktext=_ct_labels, tickvals=list(corr_targets.columns))
+                fig2.update_yaxes(ticktext=_ct_index, tickvals=list(corr_targets.index))
                 fig2.update_layout(**DARK, height=300)
                 st.plotly_chart(fig2, use_container_width=True)
 
@@ -134,11 +147,13 @@ with tab3:
 with tab4:
     st.markdown("### Nulos por columna")
     null_pct = (df.isnull().sum() / len(df) * 100).sort_values(ascending=False)
+    _null_labels = [resolve_display_name(c, _specs, _col_names) for c in null_pct.index]
     fig = px.bar(x=null_pct.index, y=null_pct.values,
                  labels={"x": "Columna", "y": "% Nulos"},
                  color=null_pct.values,
                  color_continuous_scale=["#22c55e", "#f59e0b", "#f43f5e"],
                  title="Porcentaje de valores nulos")
+    fig.update_xaxes(ticktext=_null_labels, tickvals=list(null_pct.index))
     fig.update_layout(**DARK, height=350, margin=dict(t=50))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -155,7 +170,9 @@ with tab4:
                  use_container_width=True)
 
     col_box = st.selectbox("Boxplot de:", num_cols2)
-    fig3 = px.box(df, y=col_box, color_discrete_sequence=["#5b6af0"])
+    _box_dn = resolve_display_name(col_box, _specs, _col_names)
+    fig3 = px.box(df, y=col_box, color_discrete_sequence=["#5b6af0"],
+                  labels={col_box: _box_dn})
     fig3.update_layout(**DARK, height=320)
     st.plotly_chart(fig3, use_container_width=True)
 

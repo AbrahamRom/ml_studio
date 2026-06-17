@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ml_pipeline.automl_runner import resolve_model_by_name
+from ml_pipeline.early_warning import load_column_display_names, load_quality_specs, resolve_display_name
 
 DARK = dict(
     paper_bgcolor="#ffffff",
@@ -44,6 +45,8 @@ if st.session_state.automl_run is None:
 run = st.session_state.automl_run
 target_results = run["target_results"]
 targets = list(target_results.keys())
+_specs = load_quality_specs()
+_col_names = load_column_display_names()
 
 target = st.selectbox("Target a explicar", targets)
 result = target_results[target]
@@ -55,7 +58,7 @@ has_model = automl is not None and X_test is not None
 is_classification = config["task"] == "classification"
 
 st.markdown(
-    f"**Target:** `{target}` · **Mejor modelo según holdout real:** `{result.get('best_model_name')}` · "
+    f"**Target:** `{resolve_display_name(target, _specs, _col_names)}` · **Mejor modelo según holdout real:** `{result.get('best_model_name')}` · "
     f"**Tipo:** `{result.get('best_model_type')}`"
 )
 st.caption(f"Reporte mljar: `{result['results_path']}`")
@@ -366,7 +369,7 @@ with tab2:
         )
         fig.update_layout(
             **DARK,
-            title=f"Permutation importance - {target}",
+            title=f"Permutation importance - {resolve_display_name(target, _specs, _col_names)}",
             height=max(360, top_n * 24),
             xaxis_title=f"Caída de score ({scoring})",
         )
@@ -552,7 +555,7 @@ with tab3:
 
         fig.update_layout(
             **DARK,
-            title=f"SHAP Summary – {target}",
+            title=f"SHAP Summary – {resolve_display_name(target, _specs, _col_names)}",
             height=max(360, top_shap * 28),
             yaxis=dict(autorange="reversed"),
             xaxis_title="SHAP value (impacto en la salida del modelo)",
@@ -573,7 +576,7 @@ with tab3:
         )
         fig_bar.update_layout(
             **DARK,
-            title=f"Mean |SHAP| – {target}",
+            title=f"Mean |SHAP| – {resolve_display_name(target, _specs, _col_names)}",
             height=max(300, top_shap * 24),
             xaxis_title="mean |SHAP value|",
         )
@@ -629,7 +632,7 @@ with tab3:
                     )
                     fig_wf.update_layout(
                         **DARK,
-                        title=f"Waterfall SHAP – Instancia {instance_idx} – {target}",
+                        title=f"Waterfall SHAP – Instancia {instance_idx} – {resolve_display_name(target, _specs, _col_names)}",
                         height=500,
                         yaxis_title="Contribución SHAP",
                         showlegend=False,
@@ -767,7 +770,7 @@ with tab4:
                     )
                     fig.update_layout(
                         **DARK,
-                        title=f"LIME – Instancia {lime_instance_idx} – {target}",
+                        title=f"LIME – Instancia {lime_instance_idx} – {resolve_display_name(target, _specs, _col_names)}",
                         height=max(360, len(lime_df) * 28),
                         xaxis_title="Peso (contribución a la predicción)",
                     )
@@ -922,9 +925,9 @@ with tab5:
 
                     fig.update_layout(
                         **DARK,
-                        title=f"PDP / ICE – {sel_feature} – {target}",
+                        title=f"PDP / ICE – {resolve_display_name(sel_feature, _specs, _col_names)} – {resolve_display_name(target, _specs, _col_names)}",
                         height=500,
-                        xaxis_title=sel_feature,
+                        xaxis_title=resolve_display_name(sel_feature, _specs, _col_names),
                         yaxis_title="Predicción promedio",
                         yaxis=dict(domain=[0, 0.85]),
                         yaxis2=dict(
@@ -1075,7 +1078,8 @@ with tab8:
         st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
     else:
         compute_all = st.button(
-            "⚡ Calcular SHAP para todos los targets", use_container_width=True
+            "⚡ Calcular SHAP para todos los targets", use_container_width=True,
+            key="compute_shap_global"
         )
 
         if compute_all:
@@ -1210,12 +1214,15 @@ with tab8:
                     "Normalizado por columna (target) 0-1",
                     "Log10(1 + mean |SHAP|)",
                 ],
+                key="shap_global_norm_mode",
             )
             min_val = st.slider(
                 "Importancia mínima (mean |SHAP|)",
                 0.0, float(raw_df.values.max()), 0.0,
+                key="shap_global_min",
             )
-            top_k = st.slider("Mostrar top K variables", 5, len(raw_df), len(raw_df))
+            top_k = st.slider("Mostrar top K variables", 5, len(raw_df), len(raw_df),
+                              key="shap_global_topk")
 
         df = raw_df.copy()
         df = df[df.mean(axis=1) >= min_val]
@@ -1250,8 +1257,8 @@ with tab8:
             fig = go.Figure(
                 data=go.Heatmap(
                     z=z,
-                    x=list(df.columns),
-                    y=list(df.index),
+                    x=[resolve_display_name(c, _specs, _col_names) for c in df.columns],
+                    y=[resolve_display_name(r, _specs, _col_names) for r in df.index],
                     colorscale=[[0, 'white'], [1, '#3b82f6']],
                     text=np.round(text_vals, 4),
                     texttemplate="%{text}",
@@ -1290,7 +1297,8 @@ with tab9:
         st.info("El modelo no está disponible en memoria. Esto puede ocurrir si la corrida se guardó antes de que se implementara la persistencia del modelo. Entrena nuevamente los modelos para habilitar esta funcionalidad.")
     else:
         compute_all = st.button(
-            "⚡ Calcular Permutation para todos los targets", use_container_width=True
+            "⚡ Calcular Permutation para todos los targets", use_container_width=True,
+            key="compute_perm_global"
         )
 
         if compute_all:
@@ -1376,6 +1384,7 @@ with tab9:
                     "Normalizado por columna (target) 0-1",
                     "Log10(1 + importance)",
                 ],
+                key="perm_global_norm_mode",
             )
             min_val = st.slider(
                 "Importancia mínima",
@@ -1417,8 +1426,8 @@ with tab9:
             fig = go.Figure(
                 data=go.Heatmap(
                     z=z,
-                    x=list(df.columns),
-                    y=list(df.index),
+                    x=[resolve_display_name(c, _specs, _col_names) for c in df.columns],
+                    y=[resolve_display_name(r, _specs, _col_names) for r in df.index],
                     colorscale=[[0, 'white'], [1, '#3b82f6']],
                     text=np.round(text_vals, 4),
                     texttemplate="%{text}",

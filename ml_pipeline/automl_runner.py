@@ -533,6 +533,41 @@ def run_target_automl(
         quality_spec=quality_spec,
         target=target,
     )
+
+    # --- Baseline: predecir el promedio (regresión) / clase mayoritaria (clasificación) ---
+    if config["task"] == "regression":
+        baseline_value = float(y_train_full.mean())
+        baseline_pred = np.full_like(y_test, fill_value=baseline_value, dtype=float)
+        proba_baseline = None
+        proba_classes_baseline = None
+    else:
+        majority = y_train_full.mode()
+        baseline_value = majority.iloc[0] if not majority.empty else y_test.iloc[0]
+        baseline_pred = np.full(len(y_test), fill_value=baseline_value)
+        proba_baseline = None
+        proba_classes_baseline = None
+
+    baseline_metrics = compute_holdout_metrics(
+        config["task"],
+        y_test,
+        baseline_pred,
+        proba_baseline,
+        n_features=len(feature_cols),
+        proba_classes=proba_classes_baseline,
+        spec_range=_resolve_spec_range(quality_spec, target),
+    )
+    baseline_row = {
+        "model_name": "Baseline (promedio)",
+        "model_type": "Baseline (promedio)",
+        "model_class": "BaselinePromedio",
+        **baseline_metrics,
+    }
+    per_model_metrics = pd.concat(
+        [per_model_metrics, pd.DataFrame([baseline_row])],
+        ignore_index=True,
+    )
+    # ---------------------------------------------------------------------------------
+
     best_row = _best_leaderboard_row(leaderboard, config["direction"])
     best_holdout_row = _best_holdout_row(per_model_metrics, config)
     best_model_name = best_holdout_row.get("model_name")

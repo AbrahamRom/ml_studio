@@ -15,6 +15,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     confusion_matrix,
     f1_score,
+    fbeta_score,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -22,6 +23,7 @@ from sklearn.metrics import (
 
 
 DEFAULT_CONFIG_PATH = Path("config") / "quality_specs.json"
+DEFAULT_COLUMN_DISPLAY_PATH = Path("config") / "column_display_names.json"
 DEFAULT_THRESHOLDS = (0.05, 0.10, 0.20)
 
 
@@ -32,6 +34,13 @@ def normalize_quality_name(value: str) -> str:
 
 
 def load_quality_specs(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
+    src = Path(path)
+    if not src.exists():
+        return {}
+    return json.loads(src.read_text(encoding="utf-8"))
+
+
+def load_column_display_names(path: str | Path = DEFAULT_COLUMN_DISPLAY_PATH) -> dict[str, str]:
     src = Path(path)
     if not src.exists():
         return {}
@@ -58,6 +67,21 @@ def resolve_quality_spec(
             return key, config
 
     return None, None
+
+
+def resolve_display_name(
+    target: str,
+    specs: dict[str, Any] | None = None,
+    column_names: dict[str, str] | None = None,
+) -> str:
+    """Return the display name for a target column based on quality_specs or column_display_names."""
+
+    _, config = resolve_quality_spec(target, specs)
+    if config and "display_name" in config:
+        return config["display_name"]
+    if column_names is None:
+        column_names = load_column_display_names()
+    return column_names.get(target, target)
 
 
 def _as_float(value: Any, name: str) -> float:
@@ -303,8 +327,21 @@ def compute_early_warning_predictions(
         p_oos = probability_oos(mu, residual_arr, config)
         interval_width = float(pi_high[i] - pi_low[i])
         low_confidence = bool(max_width is not None and interval_width > max_width)
-        alert = bool(p_dz >= thresholds["p_dz"] or p_oos >= thresholds["p_oos"])
+
+        # Opción 3: Penalizar p_dz/p_oos cuando el intervalo supera max_interval_width.
+        # El factor de penalización width_penalty = interval_width / max_width amplifica
+        # las probabilidades cuando la incertidumbre es mayor a la tolerable.
+        if max_width is not None and max_width > 0 and interval_width > max_width:
+            width_penalty = interval_width / max_width
+            p_dz_effective = p_dz * width_penalty
+            p_oos_effective = p_oos * width_penalty
+        else:
+            p_dz_effective = p_dz
+            p_oos_effective = p_oos
+
+        alert = bool(p_dz_effective >= thresholds["p_dz"] or p_oos_effective >= thresholds["p_oos"])
         tier = alert_tier(p_dz, p_oos, thresholds, low_confidence=low_confidence)
+        risk_score = float(max(p_dz_effective, p_oos_effective))
         rows.append(
             {
                 "row_index": index_values[i],
@@ -317,7 +354,9 @@ def compute_early_warning_predictions(
                 "low_confidence": low_confidence,
                 "p_dz": p_dz,
                 "p_oos": p_oos,
-                "risk_score": float(max(p_dz, p_oos)),
+                "p_dz_effective": float(p_dz_effective),
+                "p_oos_effective": float(p_oos_effective),
+                "risk_score": risk_score,
                 "alert": alert,
                 "alert_tier": tier,
                 "actual_in_dz": bool(actual_in_dz[i]),
@@ -352,6 +391,7 @@ def compute_alert_metrics(
             "sensitivity": 0.0,
             "specificity": 0.0,
             "f1": 0.0,
+            "f3": 0.0,
             "balanced_accuracy": 0.0,
             "confusion_matrix": [[0, 0], [0, 0]],
             "labels": ["No event", "Event"],
@@ -377,6 +417,7 @@ def compute_alert_metrics(
         "sensitivity": float(recall_score(y_true, y_pred, zero_division=0)),
         "specificity": float(specificity),
         "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "f3": float(fbeta_score(y_true, y_pred, beta=3, zero_division=0)),
         "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
         "confusion_matrix": cm.tolist(),
         "labels": ["No event", "Event"],
@@ -404,26 +445,98 @@ def compute_early_warning_metrics(predictions: pd.DataFrame) -> dict[str, Any]:
 def threshold_analysis(
     predictions: pd.DataFrame,
     *,
-    p_oos_threshold: float,
+    p_oos_threshold: float | None = None,
+    p_oos_thresholds: tuple[float, ...] | None = None,
     p_dz_thresholds: tuple[float, ...] = DEFAULT_THRESHOLDS,
 ) -> pd.DataFrame:
     rows = []
-    for threshold in p_dz_thresholds:
-        alert = (predictions["p_dz"] >= threshold) | (predictions["p_oos"] >= p_oos_threshold)
-        metrics = compute_alert_metrics(predictions["actual_event"], alert, predictions["risk_score"])
+    if p_oos_thresholds:
+        for dz_th in p_dz_thresholds:
+            for oos_th in p_oos_thresholds:
+                alert = (predictions["p_dz"] >= dz_th) | (predictions["p_oos"] >= oos_th)
+                m = compute_alert_metrics(predictions["actual_event"], alert, predictions["risk_score"])
+                rows.append(
+                    {
+                        "p_dz_threshold": dz_th,
+                        "p_oos_threshold": oos_th,
+                        "alert_count": m["alert_count"],
+                        "true_positives": m["true_positives"],
+                        "false_positives": m["false_positives"],
+                        "false_negatives": m["false_negatives"],
+                        "precision": m["precision"],
+                        "recall": m["recall"],
+                        "specificity": m["specificity"],
+                        "f1": m["f1"],
+                        "f3": m["f3"],
+                        "balanced_accuracy": m["balanced_accuracy"],
+                    }
+                )
+        else:
+            oos_th = p_oos_threshold if p_oos_threshold is not None else 0.02
+            for dz_th in p_dz_thresholds:
+                alert = (predictions["p_dz"] >= dz_th) | (predictions["p_oos"] >= oos_th)
+                m = compute_alert_metrics(predictions["actual_event"], alert, predictions["risk_score"])
+                rows.append(
+                    {
+                        "p_dz_threshold": dz_th,
+                        "p_oos_threshold": oos_th,
+                        "alert_count": m["alert_count"],
+                        "true_positives": m["true_positives"],
+                        "false_positives": m["false_positives"],
+                        "false_negatives": m["false_negatives"],
+                        "precision": m["precision"],
+                        "recall": m["recall"],
+                        "specificity": m["specificity"],
+                        "f1": m["f1"],
+                        "f3": m["f3"],
+                        "balanced_accuracy": m["balanced_accuracy"],
+                    }
+            )
+    return pd.DataFrame(rows)
+
+
+def max_interval_width_analysis(
+    predictions: pd.DataFrame,
+    *,
+    width_multipliers: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
+    baseline_max_width: float,
+    p_dz_threshold: float,
+    p_oos_threshold: float,
+) -> pd.DataFrame:
+    interval_widths = predictions["interval_width"].to_numpy()
+    p_dz_arr = predictions["p_dz"].to_numpy()
+    p_oos_arr = predictions["p_oos"].to_numpy()
+    actual_event = predictions["actual_event"].to_numpy()
+
+    rows = []
+    for mult in width_multipliers:
+        candidate = baseline_max_width * mult
+        if candidate > 0:
+            width_penalty = np.where(interval_widths > candidate, interval_widths / candidate, 1.0)
+        else:
+            width_penalty = np.ones_like(interval_widths)
+
+        p_dz_eff = p_dz_arr * width_penalty
+        p_oos_eff = p_oos_arr * width_penalty
+        alert = (p_dz_eff >= p_dz_threshold) | (p_oos_eff >= p_oos_threshold)
+        low_confidence = interval_widths > candidate
+
+        m = compute_alert_metrics(actual_event, alert)
         rows.append(
             {
-                "p_dz_threshold": threshold,
-                "p_oos_threshold": p_oos_threshold,
-                "alert_count": metrics["alert_count"],
-                "true_positives": metrics["true_positives"],
-                "false_positives": metrics["false_positives"],
-                "false_negatives": metrics["false_negatives"],
-                "precision": metrics["precision"],
-                "recall": metrics["recall"],
-                "specificity": metrics["specificity"],
-                "f1": metrics["f1"],
-                "balanced_accuracy": metrics["balanced_accuracy"],
+                "max_interval_width": round(candidate, 6),
+                "multiplier": mult,
+                "alert_count": m["alert_count"],
+                "true_positives": m["true_positives"],
+                "false_positives": m["false_positives"],
+                "false_negatives": m["false_negatives"],
+                "precision": m["precision"],
+                "recall": m["recall"],
+                "specificity": m["specificity"],
+                "f1": m["f1"],
+                "f3": m["f3"],
+                "balanced_accuracy": m["balanced_accuracy"],
+                "low_confidence_pct": float(low_confidence.mean()),
             }
         )
     return pd.DataFrame(rows)

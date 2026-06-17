@@ -267,7 +267,7 @@ elif st.session_state.automl_run:
     required_scale_cols = {"Holdout min", "Holdout max", "Holdout media", "Holdout mediana"}
     if best_metrics_df is None or best_metrics_df.empty or not required_scale_cols.issubset(
         best_metrics_df.columns
-    ):
+    ) or "Baseline (promedio)" not in best_metrics_df.columns:
         best_metrics_df = build_best_model_metrics(run.get("target_results", {}))
 
     if best_metrics_df is not None and not best_metrics_df.empty:

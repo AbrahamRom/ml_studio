@@ -1,4 +1,10 @@
-# ⚗️ ML Studio — AutoML Tabular con MLJAR
+# ⚗️ ML Studio — Sistema Predictivo para Control de Calidad de VA-MENGOC-BC
+
+Pipeline de Machine Learning para la predicción temprana de Atributos Críticos de Calidad (CQA) en la vacuna VA-MENGOC-BC del Instituto Finlay de Vacunas (Cuba). Este repositorio contiene el código fuente del trabajo de diploma *«Sistema Predictivo Basado en Machine Learning para el Control de Calidad de la Vacuna VA-MENGOC-BC»*.
+
+**Resumen de resultados:** Los modelos de regresión superan al predictor constante en los 9 CQAs continuos (R² entre 0.297 y 0.995), el sistema de alerta temprana detecta el 96.4 % de los eventos de riesgo (53/55 eventos, sensibilidad OOS 94.7 %), y los análisis SHAP/PFI confirman predictores consistentes con la física del bioproceso.
+
+**Nota sobre datos:** El conjunto de datos (matriz 515×37) es propiedad del Instituto Finlay de Vacunas y no se distribuye con este repositorio. Los datasets incluidos en `datasets_de_ejemplo/` son para demostración del pipeline. Los experimentos reportados en la tesis utilizan el AutoML con `total_time_limit=1800` (30 minutos por CQA) y semilla `random_state=42`.
 
 Interfaz visual para investigar, entrenar, comparar, evaluar y explicar modelos de machine learning tabular con `mljar-supervised`.
 

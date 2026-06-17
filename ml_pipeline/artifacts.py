@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from .early_warning import load_quality_specs, resolve_quality_spec
@@ -188,6 +189,47 @@ def load_target_artifacts(
     early_warning_metrics = read_json(early_warning_metrics_path) or {}
 
     y_true = None
+
+    # --- Baseline: inyectar fila "Baseline (promedio)" si no existe (corridas viejas) ---
+    _baseline_injected = False
+    if not per_model_metrics.empty and "model_name" in per_model_metrics.columns:
+        if "Baseline (promedio)" not in per_model_metrics["model_name"].values:
+            # y_true se carga unas líneas más abajo; la extraemos ahora de prediction_frame
+            _yt = prediction_frame["y_true"].to_numpy() if "y_true" in prediction_frame.columns else None
+            if _yt is not None and len(_yt) > 0:
+                task = result.get("config", {}).get("task", "regression")
+                n_features = len(result.get("feature_cols") or [])
+
+                if task == "regression":
+                    _val = float(np.nanmean(_yt))
+                    _pred = np.full_like(_yt, fill_value=_val)
+                    _proba = None
+                    _pclasses = None
+                else:
+                    _mode = prediction_frame["y_true"].mode()
+                    _val = _mode.iloc[0] if not _mode.empty else _yt[0]
+                    _pred = np.full(len(_yt), fill_value=_val)
+                    _proba = None
+                    _pclasses = None
+
+                from .metrics import compute_holdout_metrics
+
+                _base_metrics = compute_holdout_metrics(
+                    task, _yt, _pred, _proba,
+                    n_features=n_features, proba_classes=_pclasses,
+                )
+                _base_row = pd.DataFrame([{
+                    "model_name": "Baseline (promedio)",
+                    "model_type": "Baseline (promedio)",
+                    "model_class": "BaselinePromedio",
+                    **_base_metrics,
+                }])
+                per_model_metrics = pd.concat(
+                    [per_model_metrics, _base_row], ignore_index=True,
+                )
+                save_dataframe(per_model_metrics_path, per_model_metrics)
+                _baseline_injected = True
+    # ---------------------------------------------------------------------------------
     y_pred = None
     row_index = None
     if not prediction_frame.empty:
@@ -251,6 +293,7 @@ def load_target_artifacts(
         "early_warning_predictions": early_warning_predictions,
         "early_warning_metrics": early_warning_metrics,
         "quality_spec": quality_spec,
+        "_baseline_injected": _baseline_injected,
     }
 
 
@@ -273,11 +316,15 @@ def load_automl_run(run_path: str | Path) -> dict:
                 target_manifest,
             )
 
-    compare_df = _load_compare_table(manifest.get("final_matrix_path") or run_path / "final_matrix.csv")
+    # Descartar tablas cacheadas (se regeneran desde target_results al visitar la UI)
+    # Esto asegura que cualquier modificación post-hoc (como el baseline) se refleje.
+    compare_df = pd.DataFrame()
+    best_metrics_df = pd.DataFrame()
     summary_df = read_dataframe(manifest.get("target_summary_path") or run_path / "target_summary.csv")
-    best_metrics_df = read_dataframe(
-        manifest.get("best_model_metrics_path") or run_path / "best_model_metrics.csv"
-    )
+
+    # Limpiar flag interno antes de devolver
+    for tr in target_results.values():
+        tr.pop("_baseline_injected", None)
 
     return {
         **manifest,

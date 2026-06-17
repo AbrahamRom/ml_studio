@@ -138,6 +138,7 @@ def _build_targets_summary(
                 "precision": float(_metric_value(metrics, "precision", 0.0)),
                 "recall": float(_metric_value(metrics, "recall", 0.0)),
                 "f1": float(_metric_value(metrics, "f1", 0.0)),
+                "f3": float(_metric_value(metrics, "f3", 0.0)),
                 "specificity": float(_metric_value(metrics, "specificity", 0.0)),
                 "balanced_accuracy": float(
                     _metric_value(metrics, "balanced_accuracy", 0.0)
@@ -213,6 +214,7 @@ def _build_aggregated_confusion_matrices(
             "recall": metrics["recall"],
             "specificity": metrics["specificity"],
             "f1": metrics["f1"],
+            "f3": metrics["f3"],
             "balanced_accuracy": metrics["balanced_accuracy"],
         }
 
@@ -287,6 +289,7 @@ def _build_per_target_detail(
                 "recall": float(_metric_value(metrics, "recall", 0.0)),
                 "specificity": float(_metric_value(metrics, "specificity", 0.0)),
                 "f1": float(_metric_value(metrics, "f1", 0.0)),
+                "f3": float(_metric_value(metrics, "f3", 0.0)),
                 "balanced_accuracy": float(
                     _metric_value(metrics, "balanced_accuracy", 0.0)
                 ),
@@ -307,6 +310,7 @@ def _build_per_target_detail(
                     "recall": float(row["recall"]),
                     "specificity": float(row["specificity"]),
                     "f1": float(row["f1"]),
+                    "f3": float(row.get("f3", 0.0)),
                     "balanced_accuracy": float(row["balanced_accuracy"]),
                 }
                 for _, row in sweep.iterrows()
@@ -370,7 +374,7 @@ def _build_executive_summary(
         for t in top_alerts:
             lines.append(
                 f"  - {t['target']}: {t['alerts']:,} alerts, "
-                f"{t['events']:,} events, F1={t['f1']:.3f}"
+                f"{t['events']:,} events, F1={t['f1']:.3f}, F3={t.get('f3', 0.0):.3f}"
             )
         lines.append("")
 
@@ -379,6 +383,7 @@ def _build_executive_summary(
         for t in worst_f1:
             lines.append(
                 f"  - {t['target']}: F1={t['f1']:.3f}, "
+                f"F3={t.get('f3', 0.0):.3f}, "
                 f"Precision={t['precision']:.3f}, Recall={t['recall']:.3f}"
             )
         lines.append("")
@@ -390,7 +395,7 @@ def _build_executive_summary(
             f"Aggregated confusion matrix (alert vs event): "
             f"TP={general['true_positives']}, FP={general['false_positives']}, "
             f"TN={general['true_negatives']}, FN={general['false_negatives']}, "
-            f"F1={general['f1']:.3f}"
+            f"F1={general['f1']:.3f}, F3={general.get('f3', 0.0):.3f}"
         )
 
     return {

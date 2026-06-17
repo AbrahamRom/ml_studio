@@ -9,6 +9,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from ml_pipeline.automl_runner import predict_with_model
+from ml_pipeline.early_warning import load_column_display_names, load_quality_specs, resolve_display_name
 
 DARK = dict(
     paper_bgcolor="#ffffff",
@@ -25,6 +26,8 @@ if st.session_state.automl_run is None:
 run = st.session_state.automl_run
 target_results = run["target_results"]
 targets = list(target_results.keys())
+_specs = load_quality_specs()
+_col_names = load_column_display_names()
 
 target = st.selectbox("Target a evaluar", targets)
 
@@ -104,7 +107,7 @@ with st.expander("🌍 Global Normalized Observed vs Predicted", expanded=False)
                     y=combined.loc[mask, "predicted_norm"],
                     mode="markers",
                     marker=dict(color=color_map[tgt], size=5, opacity=0.5),
-                    name=tgt,
+                    name=resolve_display_name(tgt, _specs, _col_names),
                     hovertemplate="<b>%{text}</b><br>Obs: %{x:.3f}<br>Pred: %{y:.3f}<extra></extra>",
                     text=[tgt] * mask.sum(),
                 )
@@ -201,8 +204,10 @@ y_pred = np.asarray(y_pred)
 
 metrics = selected_metrics
 
+_target_dn = resolve_display_name(target, _specs, _col_names)
+
 st.markdown(
-    f"**Target:** `{target}` · **Tarea:** `{config['ml_task']}` · "
+    f"**Target:** `{_target_dn}` · **Tarea:** `{config['ml_task']}` · "
     f"**Mejor modelo según holdout real:** `{selected_model_name}`"
 )
 st.caption(f"Reporte mljar: `{result['results_path']}`")
@@ -214,11 +219,12 @@ if config["task"] == "classification":
     classes = metrics.get("classes") or pd.unique(pd.Series(y_true)).tolist()
     cm = confusion_matrix(y_true, y_pred, labels=classes)
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.4f}")
     c2.metric("F1 weighted", f"{metrics.get('f1', 0):.4f}")
-    c3.metric("Precision", f"{metrics.get('precision', 0):.4f}")
-    c4.metric("Recall", f"{metrics.get('recall', 0):.4f}")
+    c3.metric("F3", f"{metrics.get('f3', 0):.4f}")
+    c4.metric("Precision", f"{metrics.get('precision', 0):.4f}")
+    c5.metric("Recall", f"{metrics.get('recall', 0):.4f}")
 
     tab1, tab2, tab3, tab4 = st.tabs(
         ["🔲 Matriz", "📋 Reporte", "📈 Curvas", "🎯 Predicciones"]
@@ -243,7 +249,7 @@ if config["task"] == "classification":
                 colorscale=[[0, 'white'], [1, '#3b82f6']],
             )
         )
-        fig.update_layout(**DARK, title=f"Matriz de confusión - {target}", height=430)
+        fig.update_layout(**DARK, title=f"Matriz de confusión - {_target_dn}", height=430)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -361,7 +367,7 @@ else:
                 name="Perfecto",
             )
         )
-        fig.update_layout(**DARK, title=f"Real vs predicho - {target}", height=440)
+        fig.update_layout(**DARK, title=f"Real vs predicho - {_target_dn}", height=440)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -513,6 +519,85 @@ st.download_button(
     label="📥 Descargar reporte de Evaluación (JSON)",
     data=report_json,
     file_name="evaluation_report.json",
+    mime="application/json",
+    use_container_width=True,
+)
+
+
+# ---------------------------------------------------------------------------
+# Global report for all targets
+# ---------------------------------------------------------------------------
+def _build_global_evaluate_report(run, target_results):
+    targets_data = {}
+    for tgt, res in target_results.items():
+        cfg = res.get("config", {})
+        m = res.get("holdout_metrics") or {}
+        y_t = res.get("y_test")
+        y_p = res.get("predictions")
+        proba = res.get("proba")
+
+        entry = {
+            "config": dict(cfg),
+            "best_model": {
+                "name": res.get("best_model_name"),
+                "type": res.get("best_model_type"),
+            },
+            "metrics": {k: v for k, v in m.items() if isinstance(v, (int, float, str))},
+        }
+
+        if y_t is not None and y_p is not None:
+            y_t_a = np.asarray(y_t)
+            y_p_a = np.asarray(y_p)
+            if cfg.get("task") == "classification":
+                classes = m.get("classes") or sorted(pd.unique(pd.Series(y_t_a))).tolist()
+                entry["classification_report"] = m.get("classification_report")
+                entry["classes"] = classes
+                entry["confusion_matrix"] = m.get("confusion_matrix")
+                if proba is not None:
+                    entry["probability_shape"] = list(np.asarray(proba).shape)
+            else:
+                residuals = y_t_a - y_p_a
+                entry["residuals"] = {
+                    "mean": float(np.mean(residuals)),
+                    "std": float(np.std(residuals)),
+                    "min": float(np.min(residuals)),
+                    "max": float(np.max(residuals)),
+                    "percentile_25": float(np.percentile(residuals, 25)),
+                    "percentile_75": float(np.percentile(residuals, 75)),
+                    "mean_abs": float(np.mean(np.abs(residuals))),
+                }
+                entry["predictions_summary"] = {
+                    "y_true": {"mean": float(np.mean(y_t_a)), "std": float(np.std(y_t_a)), "min": float(np.min(y_t_a)), "max": float(np.max(y_t_a))},
+                    "y_pred": {"mean": float(np.mean(y_p_a)), "std": float(np.std(y_p_a)), "min": float(np.min(y_p_a)), "max": float(np.max(y_p_a))},
+                    "n": int(len(y_t_a)),
+                }
+
+        entry["artifacts"] = {
+            "leaderboard": res.get("leaderboard_path"),
+            "predictions": res.get("predictions_path"),
+            "metrics": res.get("metrics_path"),
+        }
+        targets_data[tgt] = entry
+
+    report = {
+        "project_info": {
+            "run_id": run["run_id"],
+            "timestamp": run.get("timestamp") or datetime.now().isoformat(),
+            "description": run.get("description", ""),
+            "base_path": str(run.get("base_path", "")),
+        },
+        "targets": targets_data,
+        "target_count": len(target_results),
+    }
+    return report
+
+
+global_report_data = _build_global_evaluate_report(run, target_results)
+global_report_json = json.dumps(global_report_data, indent=2, ensure_ascii=False)
+st.download_button(
+    label="📥 Descargar reporte global de todos los targets (JSON)",
+    data=global_report_json,
+    file_name="global_evaluation_report.json",
     mime="application/json",
     use_container_width=True,
 )

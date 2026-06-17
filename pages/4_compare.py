@@ -11,6 +11,7 @@ from ml_pipeline.comparison import (
     build_final_matrix,
     build_target_summary,
 )
+from ml_pipeline.early_warning import load_column_display_names, load_quality_specs, resolve_display_name
 
 DARK = dict(
     paper_bgcolor="#ffffff",
@@ -31,6 +32,8 @@ compare_df = run.get("compare_df")
 summary_df = run.get("summary_df")
 best_metrics_df = run.get("best_model_metrics_df")
 targets = list(target_results.keys())
+_specs = load_quality_specs()
+_col_names = load_column_display_names()
 
 if compare_df is None or compare_df.empty:
     compare_df = build_final_matrix(target_results)
@@ -39,7 +42,7 @@ if summary_df is None or summary_df.empty:
 required_scale_cols = {"Holdout min", "Holdout max", "Holdout media", "Holdout mediana"}
 if best_metrics_df is None or best_metrics_df.empty or not required_scale_cols.issubset(
     best_metrics_df.columns
-):
+) or "Baseline (promedio)" not in best_metrics_df.columns:
     best_metrics_df = build_best_model_metrics(target_results)
 
 st.caption(f"Corrida `{run['run_id']}` · Artefactos `{run['base_path']}`")
@@ -108,6 +111,7 @@ with tab1:
                     "nrmse": "NRMSE", "nmae": "NMAE", "score_global": "Score Global",
                 }
                 _data = best_metrics_df.set_index("Target")[_sel].rename(columns={c: _labels.get(c, c) for c in _sel})
+                _data_index_dn = [resolve_display_name(t, _specs, _col_names) for t in _data.index]
 
                 with st.expander("⚙️ Opciones de escala", expanded=False):
                     norm_mode = st.selectbox(
@@ -145,7 +149,7 @@ with tab1:
                     go.Heatmap(
                         z=z,
                         x=_data.columns,
-                        y=_data.index,
+                        y=_data_index_dn,
                         text=text_vals,
                         texttemplate="%{text}",
                         colorscale=[[0, 'white'], [1, '#3b82f6']],
@@ -194,6 +198,7 @@ with tab3:
     row = row.sort_values(ascending=(direction == "min"))
 
     colors = [PALETTE[0] if i == 0 else "#334155" for i in range(len(row))]
+    _bar_target_dn = resolve_display_name(target, _specs, _col_names)
     fig = go.Figure(
         go.Bar(
             x=row.index,
@@ -205,7 +210,7 @@ with tab3:
     )
     fig.update_layout(
         **DARK,
-        title=f"{target} · mejor {_primary_metric_for(target)} por tipo de modelo",
+        title=f"{_bar_target_dn} · mejor {_primary_metric_for(target)} por tipo de modelo",
         height=420,
         margin=dict(t=50, b=30, l=10, r=10),
         yaxis=dict(gridcolor="#252a38"),

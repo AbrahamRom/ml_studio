@@ -43,26 +43,44 @@ def _best_by_direction(df: pd.DataFrame, direction: str) -> pd.DataFrame:
 
 
 def build_final_matrix(target_results: dict) -> pd.DataFrame:
-    """Build target x model_type matrix with the best metric per model family."""
+    """Build target x model_type matrix with the best metric per model family.
+
+    Uses the internal leaderboard (validation metric) for all model types, then
+    supplements with holdout metrics from ``per_model_metrics`` for any model_type
+    not present in the leaderboard (e.g. custom baselines like "Baseline (promedio)").
+    """
 
     rows = {}
     for target, result in target_results.items():
+        target_metrics: dict[str, float] = {}
+
+        # 1. Leaderboard (internal validation metric)
         leaderboard = result.get("leaderboard")
         if leaderboard is None:
             leaderboard = result.get("leaderboard_df")
-        if leaderboard is None or len(leaderboard) == 0:
-            continue
+        if leaderboard is not None and len(leaderboard) > 0:
+            lb = pd.DataFrame(leaderboard).copy()
+            if "model_type" in lb.columns and "metric_value" in lb.columns:
+                direction = result.get("config", {}).get("direction", "max")
+                best_rows = _best_by_direction(lb.dropna(subset=["metric_value"]), direction)
+                for _, row in best_rows.iterrows():
+                    target_metrics[row["model_type"]] = float(row["metric_value"])
 
-        lb = pd.DataFrame(leaderboard).copy()
-        if "model_type" not in lb.columns or "metric_value" not in lb.columns:
-            continue
+        # 2. Supplement with holdout metrics for model_types not in leaderboard
+        per_model_metrics = result.get("per_model_metrics")
+        if per_model_metrics is not None and len(per_model_metrics) > 0:
+            pm = pd.DataFrame(per_model_metrics)
+            config = result.get("config", {})
+            primary_metric = config.get("primary_metric", "score_global")
+            if "model_type" in pm.columns and primary_metric in pm.columns:
+                for _, row in pm.iterrows():
+                    mt = row["model_type"]
+                    if mt not in target_metrics:
+                        val = row.get(primary_metric)
+                        if val is not None and pd.notna(val):
+                            target_metrics[mt] = float(val)
 
-        direction = result.get("config", {}).get("direction", "max")
-        best_rows = _best_by_direction(lb.dropna(subset=["metric_value"]), direction)
-        rows[target] = {
-            row["model_type"]: float(row["metric_value"])
-            for _, row in best_rows.iterrows()
-        }
+        rows[target] = target_metrics
 
     matrix = pd.DataFrame.from_dict(rows, orient="index")
     if not matrix.empty:
@@ -157,18 +175,7 @@ def build_best_model_metrics(target_results: dict) -> pd.DataFrame:
         if best_row is None:
             continue
 
-        row = {
-            "Target": target,
-            "Mejor modelo holdout": best_row.get("model_name"),
-            "Tipo holdout": best_row.get("model_type"),
-        }
-        if selected_metric:
-            row["Métrica usada"] = selected_metric
-
         scale_stats = _holdout_target_scale_stats(result)
-        if scale_stats:
-            row.update(scale_stats)
-
         metric_columns = [
             column
             for column in metrics_df.columns
@@ -181,8 +188,26 @@ def build_best_model_metrics(target_results: dict) -> pd.DataFrame:
             }
             and pd.api.types.is_numeric_dtype(metrics_df[column])
         ]
+
+        # --- Best model row ---
+        row = {
+            "Target": target,
+            "Mejor modelo holdout": best_row.get("model_name"),
+            "Tipo holdout": best_row.get("model_type"),
+        }
+        if selected_metric:
+            row["Métrica usada"] = selected_metric
+        if scale_stats:
+            row.update(scale_stats)
         for column in metric_columns:
             row[column] = best_row.get(column)
+
+        # --- Columna Baseline (promedio) con su métrica líder ---
+        baseline_match = metrics_df.loc[metrics_df["model_name"] == "Baseline (promedio)"]
+        if not baseline_match.empty:
+            bl_row = baseline_match.iloc[0]
+            bl_metric = result.get("config", {}).get("primary_metric", "score_global")
+            row["Baseline (promedio)"] = bl_row.get(bl_metric)
 
         rows.append(row)
 

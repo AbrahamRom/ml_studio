@@ -12,8 +12,11 @@ from ml_pipeline.early_warning import (
     alert_thresholds,
     build_danger_zone_intervals,
     compute_alert_metrics,
+    load_column_display_names,
     load_quality_specs,
+    max_interval_width_analysis,
     recompute_early_warning_for_target,
+    resolve_display_name,
     resolve_quality_spec,
     spec_description,
     threshold_analysis,
@@ -75,7 +78,9 @@ def _summary_rows(target_results, specs):
                 "False alerts/batch": float(_metric_value(metrics, "false_alerts_per_batch", 0.0)),
                 "Precision": float(_metric_value(metrics, "precision", 0.0)),
                 "Recall": float(_metric_value(metrics, "recall", 0.0)),
+                "Specificity": float(_metric_value(metrics, "specificity", 0.0)),
                 "F1": float(_metric_value(metrics, "f1", 0.0)),
+                "F3": float(_metric_value(metrics, "f3", 0.0)),
             }
         )
     return pd.DataFrame(rows)
@@ -108,6 +113,7 @@ if st.session_state.automl_run is None:
 run = st.session_state.automl_run
 target_results = run.get("target_results") or {}
 specs = load_quality_specs()
+_col_names = load_column_display_names()
 regression_targets = [
     target
     for target, result in target_results.items()
@@ -271,7 +277,7 @@ status, spec, predictions = _early_warning_status(result, selected_target, specs
 metrics = result.get("early_warning_metrics") or {}
 
 st.divider()
-st.markdown(f"### {selected_target}")
+st.markdown(f"### {resolve_display_name(selected_target, specs, _col_names)}")
 
 if spec is None:
     st.warning("Este target no tiene especificacion en `config/quality_specs.json`.")
@@ -405,11 +411,17 @@ c6.metric("Precision", f"{_metric_value(metrics, 'precision', 0.0):.3f}")
 c7.metric("Recall", f"{_metric_value(metrics, 'recall', 0.0):.3f}")
 c8.metric("Specificity", f"{_metric_value(metrics, 'specificity', 0.0):.3f}")
 c9.metric("F1", f"{_metric_value(metrics, 'f1', 0.0):.3f}")
-c10.metric("Balanced acc.", f"{_metric_value(metrics, 'balanced_accuracy', 0.0):.3f}")
+c10.metric("F3", f"{_metric_value(metrics, 'f3', 0.0):.3f}")
 
 c11, c12 = st.columns(2)
-c11.metric("ROC-AUC", "-" if "roc_auc" not in metrics else f"{metrics['roc_auc']:.3f}")
-c12.metric("PR-AUC", "-" if "pr_auc" not in metrics else f"{metrics['pr_auc']:.3f}")
+c11.metric("Balanced acc.", f"{_metric_value(metrics, 'balanced_accuracy', 0.0):.3f}")
+c12.metric("ROC-AUC", "-" if "roc_auc" not in metrics else f"{metrics['roc_auc']:.3f}")
+
+c13, c14 = st.columns(2)
+c13.metric("PR-AUC", "-" if "pr_auc" not in metrics else f"{metrics['pr_auc']:.3f}")
+c14.empty()
+
+
 
 tab1, tab2, tab3, tab4 = st.tabs(
     ["Alert Table", "Confusion Matrix", "Threshold Analysis", "Risk Distribution"]
@@ -438,12 +450,110 @@ with tab2:
     _show_confusion_matrix(metrics, f"Early Warning confusion matrix - {selected_target}")
 
 with tab3:
+    st.markdown("#### Threshold Sweep (P(DZ) x P(OOS))")
+    default_dz = [t for t in (0.05, 0.10, 0.20) if t != thresholds["p_dz"]]
+    if thresholds["p_dz"] not in default_dz:
+        default_dz.append(thresholds["p_dz"])
+    default_dz.sort()
+
+    col_dz, col_oos = st.columns(2)
+    with col_dz:
+        dz_options = [0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+        if thresholds["p_dz"] not in dz_options:
+            dz_options.append(thresholds["p_dz"])
+            dz_options.sort()
+        sel_dz = st.multiselect(
+            "P(DZ) thresholds",
+            options=dz_options,
+            default=default_dz,
+            key="tz_dz_thresholds",
+        )
+    with col_oos:
+        oos_options = [0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+        if thresholds["p_oos"] not in oos_options:
+            oos_options.append(thresholds["p_oos"])
+            oos_options.sort()
+        sel_oos = st.multiselect(
+            "P(OOS) thresholds",
+            options=oos_options,
+            default=[thresholds["p_oos"]],
+            key="tz_oos_thresholds",
+        )
+
+    dz_tuple = tuple(sel_dz) if sel_dz else (thresholds["p_dz"],)
+    oos_tuple = tuple(sel_oos) if sel_oos else None
+
     sweep = threshold_analysis(
         predictions,
-        p_oos_threshold=thresholds["p_oos"],
-        p_dz_thresholds=(0.05, 0.10, 0.20),
+        p_oos_threshold=thresholds["p_oos"] if oos_tuple is None else None,
+        p_oos_thresholds=oos_tuple,
+        p_dz_thresholds=dz_tuple,
     )
     st.dataframe(sweep.round(4), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("#### Max Interval Width Analysis")
+
+    baseline_miw = (spec.get("uncertainty") or {}).get("max_interval_width")
+    if baseline_miw is None or baseline_miw <= 0:
+        st.info("Este target no tiene `max_interval_width` configurado en `uncertainty`. Agregalo en `quality_specs.json` para activar este analisis.")
+    else:
+        st.caption(f"Baseline actual: **{baseline_miw:g}** (del spec). Los multiplificadores generan valores relativos a este baseline.")
+        sel_mult = st.multiselect(
+            "Width multipliers (relativos al baseline)",
+            options=[0.10, 0.25, 0.50, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0],
+            default=[0.25, 0.50, 1.0, 2.0, 4.0],
+            key="tz_width_multipliers",
+        )
+        if sel_mult:
+            width_result = max_interval_width_analysis(
+                predictions,
+                width_multipliers=tuple(sel_mult),
+                baseline_max_width=float(baseline_miw),
+                p_dz_threshold=thresholds["p_dz"],
+                p_oos_threshold=thresholds["p_oos"],
+            )
+            st.dataframe(width_result.round(4), use_container_width=True, hide_index=True)
+
+            fig_miw = go.Figure()
+            fig_miw.add_trace(
+                go.Scatter(
+                    x=width_result["max_interval_width"],
+                    y=width_result["f1"],
+                    mode="lines+markers",
+                    name="F1",
+                    marker_color="#3b82f6",
+                )
+            )
+            fig_miw.add_trace(
+                go.Scatter(
+                    x=width_result["max_interval_width"],
+                    y=width_result["recall"],
+                    mode="lines+markers",
+                    name="Recall",
+                    marker_color="#22c55e",
+                )
+            )
+            fig_miw.add_trace(
+                go.Scatter(
+                    x=width_result["max_interval_width"],
+                    y=width_result["precision"],
+                    mode="lines+markers",
+                    name="Precision",
+                    marker_color="#f97316",
+                )
+            )
+            fig_miw.add_vline(x=baseline_miw, line=dict(color="#ef4444", dash="dash"), annotation_text="baseline")
+            fig_miw.update_layout(
+                **DARK,
+                title=f"Metricas vs Max Interval Width - {resolve_display_name(selected_target, specs, _col_names)}",
+                xaxis_title="Max Interval Width",
+                yaxis_title="Score",
+                height=390,
+            )
+            st.plotly_chart(fig_miw, use_container_width=True)
+        else:
+            st.info("Selecciona al menos un multiplier para ejecutar el analisis.")
 
 with tab4:
     fig = go.Figure()
@@ -467,7 +577,7 @@ with tab4:
     fig.add_vline(x=thresholds["p_oos"], line=dict(color="#ef4444", dash="dot"))
     fig.update_layout(
         **DARK,
-        title=f"Predictive risk distribution - {selected_target}",
+        title=f"Predictive risk distribution - {resolve_display_name(selected_target, specs, _col_names)}",
         xaxis_title="Probability",
         yaxis_title="Batch count",
         barmode="overlay",

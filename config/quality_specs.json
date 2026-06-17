@@ -1,5 +1,6 @@
 {
   "protein_concentration": {
+    "display_name": "Concentraci\u00f3n de prote\u00edna",
     "aliases": [
       "concent_prot_ug_ml_envasada",
       "Protein concentration (ug/mL)",
@@ -27,6 +28,7 @@
     }
   },
   "polysaccharide_concentration": {
+    "display_name": "Concentraci\u00f3n de polisac\u00e1rido",
     "aliases": [
       "concent_polisac_ug_ml_envasada",
       "Polysaccharide concentration (ug/mL)",
@@ -45,8 +47,8 @@
       "total_fraction": 0.10
     },
     "alert_thresholds": {
-      "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_dz": 0.15,
+      "p_oos": 0.15
     },
     "uncertainty": {
       "coverage": 0.90,
@@ -54,6 +56,7 @@
     }
   },
   "protein_adsorption": {
+    "display_name": "Adsorci\u00f3n de prote\u00edna",
     "aliases": [
       "adsorc_prot_porcentaje_envasada",
       "Protein adsorption (%)",
@@ -71,8 +74,8 @@
       "width": 3
     },
     "alert_thresholds": {
-      "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_dz": 0.05,
+      "p_oos": 0.04
     },
     "uncertainty": {
       "coverage": 0.90,
@@ -80,6 +83,7 @@
     }
   },
   "polysaccharide_adsorption": {
+    "display_name": "Adsorci\u00f3n de polisac\u00e1rido",
     "aliases": [
       "adsorc_polisac_porcentaje_envasada",
       "Polysaccharide adsorption (%)",
@@ -97,15 +101,16 @@
       "width": 3
     },
     "alert_thresholds": {
-      "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_dz": 0.02,
+      "p_oos": 0.01
     },
     "uncertainty": {
       "coverage": 0.90,
-      "max_interval_width": 10
+      "max_interval_width": 40
     }
   },
   "ph": {
+    "display_name": "pH",
     "aliases": [
       "ph_envasada",
       "pH",
@@ -124,7 +129,7 @@
     },
     "alert_thresholds": {
       "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_oos": 0.05
     },
     "uncertainty": {
       "coverage": 0.90,
@@ -132,6 +137,7 @@
     }
   },
   "thimerosal_concentration": {
+    "display_name": "Concentraci\u00f3n de tiomersal",
     "aliases": [
       "concent_tiomersal_mg_ml_envasada",
       "Thimerosal concentration (mg/mL)",
@@ -151,7 +157,7 @@
     },
     "alert_thresholds": {
       "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_oos": 0.03
     },
     "uncertainty": {
       "coverage": 0.90,
@@ -159,6 +165,7 @@
     }
   },
   "aloh3_concentration": {
+    "display_name": "Concentraci\u00f3n de Al(OH)3",
     "aliases": [
       "concent_al_oh_3_mg_ml_envasada",
       "Al(OH)3 concentration (mg/mL)",
@@ -186,6 +193,7 @@
     }
   },
   "average_vial_content": {
+    "display_name": "Contenido promedio de vial",
     "aliases": [
       "conten_promed_bbo_ml_envasada",
       "Average vial content (mL)",
@@ -212,6 +220,7 @@
     }
   },
   "endotoxin_content": {
+    "display_name": "Contenido de endotoxinas",
     "aliases": [
       "conten_endotoxinas_ue_ml_envasada",
       "Endotoxin content (EU/mL)",
@@ -230,14 +239,15 @@
     },
     "alert_thresholds": {
       "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_oos": 0.05
     },
     "uncertainty": {
       "coverage": 0.90,
-      "max_interval_width": 5000
+      "max_interval_width": 7000
     }
   },
   "mouse_antibody_activity": {
+    "display_name": "Actividad de anticuerpos",
     "aliases": [
       "inmunog_activ_antic_igg_envasada",
       "Mouse antibody activity",
@@ -253,8 +263,8 @@
       "width": 700
     },
     "alert_thresholds": {
-      "p_dz": 0.10,
-      "p_oos": 0.02
+      "p_dz": 0.25,
+      "p_oos": 0.20
     },
     "uncertainty": {
       "coverage": 0.90,
@@ -262,6 +272,7 @@
     }
   },
   "bactericidal_activity": {
+    "display_name": "Actividad bactericida",
     "aliases": [
       "inmunog_activ_antic_bact_envasada",
       "Bactericidal activity",

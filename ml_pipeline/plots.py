@@ -10,6 +10,21 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.metrics import precision_recall_curve, roc_curve
 
+from ml_pipeline.early_warning import load_column_display_names, load_quality_specs, resolve_display_name
+
+
+_specs_cache = None
+_col_names_cache = None
+
+
+def _dn(target: str) -> str:
+    global _specs_cache, _col_names_cache
+    if _specs_cache is None:
+        _specs_cache = load_quality_specs()
+    if _col_names_cache is None:
+        _col_names_cache = load_column_display_names()
+    return resolve_display_name(target, _specs_cache, _col_names_cache)
+
 
 DARK = dict(
     paper_bgcolor="#ffffff",
@@ -51,7 +66,7 @@ def save_regression_plots(out_dir: str | Path, target: str, y_true, y_pred) -> d
             name="Perfecto",
         )
     )
-    actual.update_layout(**DARK, title=f"Real vs predicho - {target}", xaxis_title="Real", yaxis_title="Predicho")
+    actual.update_layout(**DARK, title=f"Real vs predicho - {_dn(target)}", xaxis_title="Real", yaxis_title="Predicho")
 
     residual = go.Figure(
         go.Scatter(
@@ -62,13 +77,13 @@ def save_regression_plots(out_dir: str | Path, target: str, y_true, y_pred) -> d
         )
     )
     residual.add_hline(y=0, line=dict(color="#2dd4bf", dash="dash"))
-    residual.update_layout(**DARK, title=f"Residuos - {target}", xaxis_title="Predicho", yaxis_title="Residuo")
+    residual.update_layout(**DARK, title=f"Residuos - {_dn(target)}", xaxis_title="Predicho", yaxis_title="Residuo")
 
     hist = px.histogram(
         x=residuals,
         nbins=40,
         color_discrete_sequence=["#5b6af0"],
-        title=f"Distribución de residuos - {target}",
+        title=f"Distribución de residuos - {_dn(target)}",
         labels={"x": "Residuo"},
     )
     hist.update_layout(**DARK)
@@ -101,7 +116,7 @@ def save_classification_plots(out_dir: str | Path, target: str, y_true, y_pred, 
             colorscale=[[0, 'white'], [1, '#3b82f6']],
         )
     )
-    cm.update_layout(**DARK, title=f"Matriz de confusión - {target}")
+    cm.update_layout(**DARK, title=f"Matriz de confusión - {_dn(target)}")
     paths = {"confusion_matrix": _write(cm, out / "confusion_matrix.html")}
 
     if proba is not None and len(labels) == 2:
@@ -113,11 +128,11 @@ def save_classification_plots(out_dir: str | Path, target: str, y_true, y_pred, 
             roc = go.Figure()
             roc.add_trace(go.Scatter(x=fpr, y=tpr, fill="tozeroy", line=dict(color="#5b6af0")))
             roc.add_shape(type="line", x0=0, y0=0, x1=1, y1=1, line=dict(dash="dash", color="#64748b"))
-            roc.update_layout(**DARK, title=f"ROC - {target}", xaxis_title="FPR", yaxis_title="TPR")
+            roc.update_layout(**DARK, title=f"ROC - {_dn(target)}", xaxis_title="FPR", yaxis_title="TPR")
 
             pr = go.Figure()
             pr.add_trace(go.Scatter(x=recall, y=precision, fill="tozeroy", line=dict(color="#2dd4bf")))
-            pr.update_layout(**DARK, title=f"Precision-Recall - {target}", xaxis_title="Recall", yaxis_title="Precision")
+            pr.update_layout(**DARK, title=f"Precision-Recall - {_dn(target)}", xaxis_title="Recall", yaxis_title="Precision")
 
             paths["roc_curve"] = _write(roc, out / "roc_curve.html")
             paths["precision_recall"] = _write(pr, out / "precision_recall.html")
