@@ -4,7 +4,7 @@ Pipeline de Machine Learning para la predicción temprana de Atributos Críticos
 
 **Resumen de resultados:** Los modelos de regresión superan al predictor constante en los 9 CQAs continuos (R² entre 0.297 y 0.995), el sistema de alerta temprana detecta el 96.4 % de los eventos de riesgo (53/55 eventos, sensibilidad OOS 94.7 %), y los análisis SHAP/PFI confirman predictores consistentes con la física del bioproceso.
 
-**Nota sobre datos:** El conjunto de datos (matriz 515×37) es propiedad del Instituto Finlay de Vacunas y no se distribuye con este repositorio. Los datasets incluidos en `datasets_de_ejemplo/` son para demostración del pipeline. Los experimentos reportados en la tesis utilizan el AutoML con `total_time_limit=1800` (30 minutos por CQA) y semilla `random_state=42`.
+**Nota sobre datos:** El conjunto de datos (matriz 515×37) es propiedad del Instituto Finlay de Vacunas y no se distribuye con este repositorio. El archivo `data_example.csv` incluido en la raíz del repositorio es para demostración del pipeline. Los experimentos reportados en la tesis utilizan el AutoML con `total_time_limit=1800` (30 minutos por CQA) y semilla `random_state=42`.
 
 Interfaz visual para investigar, entrenar, comparar, evaluar y explicar modelos de machine learning tabular con `mljar-supervised`.
 
@@ -100,12 +100,8 @@ artifacts/automl_runs/{run_id}/
     mljar/
 ```
 
-## Datasets de ejemplo incluidos
+## Dataset de ejemplo
 
-| Dataset | Targets sugeridos |
+| Archivo | Descripción |
 |---|---|
-| 🏠 Housing | `price_eur`, `rent_eur`, `quality_score` |
-| 🌸 Iris | `target` |
-| 💳 Credit Risk | `default`, `fraud_flag` |
-| 🌡️ Energy | `heating_load`, `cooling_load` |
-| 🍷 Wine Quality | `target` |
+| `data_example.csv` | 37 variables del proceso de producción de VA-MENGOC-BC (515 muestras). Ver `config/quality_specs.json` para los targets CQA con especificaciones. |

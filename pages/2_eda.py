@@ -247,11 +247,15 @@ with tab5:
 
     # Pretty numeric formatting (3 decimals, leave ints alone).
     for col_name in ["Mínimo", "Máximo", "Media", "Mediana", "Varianza",
-                     "Desv. estándar", "Shapiro W", "Shapiro p-valor", "% Nulos"]:
+                     "Desv. estándar", "Shapiro W", "% Nulos"]:
         if col_name in display.columns:
             display[col_name] = display[col_name].apply(
                 lambda v: (f"{v:.4f}" if pd.notnull(v) and isinstance(v, float) else v)
             )
+    if "Shapiro p-valor" in display.columns:
+        display["Shapiro p-valor"] = display["Shapiro p-valor"].apply(
+            lambda v: (f"{v:.4g}" if pd.notnull(v) and isinstance(v, float) else v)
+        )
     if "n" in display.columns:
         display["n"] = display["n"].astype("Int64")
     if "n (Shapiro)" in display.columns:
